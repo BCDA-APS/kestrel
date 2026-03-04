@@ -29,7 +29,7 @@ export default function VisualizationGrid({ panels, onRemovePanel }: Visualizati
   }
 
   return (
-    <div className={`grid ${gridCols(panels.length)} gap-4 auto-rows-[minmax(400px,1fr)]`}>
+    <div className={`grid ${gridCols(panels.length)} gap-4 auto-rows-[600px]`}>
       {panels.map((panel) => (
         <VisualizationPanel
           key={panel.id}

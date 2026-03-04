@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 interface TiledMetadata {
   shape: number[];
   fullUrl: string;
+  dims: string[] | null;
 }
 
 export interface UseTiledImageResult {
@@ -47,7 +48,12 @@ export function useTiledImage(metadataUrl: string): UseTiledImageResult {
         if (!shape || !fullUrl) {
           throw new Error('Unexpected Tiled metadata format — missing shape or full link.');
         }
-        setMetadata({ shape, fullUrl });
+        // Dimension names may live in different places depending on Tiled server version
+        const dims: string[] | null =
+          json.data?.attributes?.structure?.dims ??
+          json.data?.attributes?.dims ??
+          null;
+        setMetadata({ shape, fullUrl, dims });
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to fetch metadata');
       }

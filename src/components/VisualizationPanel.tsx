@@ -67,10 +67,11 @@ export default function VisualizationPanel({ panel, onRemove }: VisualizationPan
           <div className="w-full h-full">
             <PlotlyHeatmap
               array={array}
-              title={panel.title}
               colorScale="Viridis"
               showScale
               lockPlotHeightToParent
+              xAxisTitle={metadata?.dims?.at(-1) ?? 'X'}
+              yAxisTitle={metadata?.dims?.at(-2) ?? 'Y'}
             />
           </div>
         )}

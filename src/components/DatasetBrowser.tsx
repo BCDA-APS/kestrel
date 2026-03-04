@@ -2,13 +2,14 @@ import { Tiled } from '@blueskyproject/finch';
 
 type DatasetBrowserProps = {
   serverUrl: string;
+  initialPath?: string;
   onSelectDataset: (url: string, title: string) => void;
 };
 
-export default function DatasetBrowser({ serverUrl, onSelectDataset }: DatasetBrowserProps) {
+export default function DatasetBrowser({ serverUrl, initialPath, onSelectDataset }: DatasetBrowserProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleSelect = (item: any) => {
-    const url: string = item?.links?.self ?? '';
+    const url: string = item?.links?.self ?? item?.self ?? '';
     if (!url) return;
     // Derive a human-readable title from the URL path
     const segments = url.replace(/\/+$/, '').split('/');
@@ -30,6 +31,7 @@ export default function DatasetBrowser({ serverUrl, onSelectDataset }: DatasetBr
         */}
         <Tiled
           tiledBaseUrl={`${serverUrl}/api/v1`}
+          initialPath={initialPath}
           onSelectCallback={handleSelect}
         />
       </div>
