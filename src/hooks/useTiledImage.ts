@@ -2,13 +2,15 @@ import { useState, useEffect } from 'react';
 
 interface TiledMetadata {
   shape: number[];
+  chunks: number[][] | null;  // chunks[dim] = list of chunk sizes along that dim
   fullUrl: string;
+  blockUrlTemplate: string | null;  // e.g. "...?block={0},{1},{2},{3}"
   dims: string[] | null;
 }
 
 export interface UseTiledImageResult {
-  array: number[][] | null;  // 2D/3D data decoded from PNG
-  line: number[] | null;     // 1D data fetched as JSON
+  array: number[][] | null;
+  line: number[] | null;
   metadata: TiledMetadata | null;
   zIndex: number;
   setZIndex: (z: number) => void;
@@ -24,6 +26,48 @@ function flatToMultiIndex(flat: number, shape: number[]): number[] {
     rem = Math.floor(rem / shape[i]);
   }
   return indices;
+}
+
+/** Replace {0},{1},... placeholders in a Tiled block URL template with actual indices. */
+function buildBlockUrl(template: string, blockIndices: number[], format: string): string {
+  const withIndices = template.replace(/\{(\d+)\}/g, (_, i) => String(blockIndices[parseInt(i)]));
+  return `${withIndices}&format=${format}`;
+}
+
+async function decodePng(blob: Blob): Promise<number[][]> {
+  const bitmap = await createImageBitmap(blob);
+  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  const ctx = canvas.getContext('2d')!;
+  ctx.drawImage(bitmap, 0, 0);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const result: number[][] = [];
+  for (let row = 0; row < canvas.height; row++) {
+    const rowData: number[] = [];
+    for (let col = 0; col < canvas.width; col++) {
+      const idx = (row * canvas.width + col) * 4;
+      rowData.push(
+        0.299 * imageData.data[idx] +
+        0.587 * imageData.data[idx + 1] +
+        0.114 * imageData.data[idx + 2],
+      );
+    }
+    result.push(rowData);
+  }
+  return result;
+}
+
+const TIMEOUT_MS = 15_000;
+
+async function fetchWithTimeout(url: string, signal?: AbortSignal): Promise<Response> {
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  // Chain with any external signal
+  signal?.addEventListener('abort', () => ctrl.abort());
+  try {
+    return await fetch(url, { signal: ctrl.signal });
+  } finally {
+    clearTimeout(tid);
+  }
 }
 
 export function useTiledImage(metadataUrl: string): UseTiledImageResult {
@@ -50,21 +94,19 @@ export function useTiledImage(metadataUrl: string): UseTiledImageResult {
         const shape: number[] | undefined = json.data?.attributes?.structure?.shape;
         const fullUrl: string | undefined = json.data?.links?.full;
         if (!shape || !fullUrl) {
-          // Check if this is a non-array type (table, dataframe, etc.)
           const nodeType: string = json.data?.type ?? json.data?.attributes?.structure?.family ?? '';
           if (nodeType && nodeType !== 'array') {
             throw new Error(`Cannot visualize a "${nodeType}" dataset — only array data is supported.`);
           }
-          if (fullUrl && fullUrl.includes('/table/')) {
-            throw new Error('Cannot visualize a table/DataFrame — only array data is supported.');
-          }
-          throw new Error('This dataset cannot be visualized (missing shape or data link). It may be a table or unsupported type.');
+          throw new Error('This dataset cannot be visualized (missing shape or data link).');
         }
         const dims: string[] | null =
           json.data?.attributes?.structure?.dims ??
           json.data?.attributes?.dims ??
           null;
-        setMetadata({ shape, fullUrl, dims });
+        const chunks: number[][] | null = json.data?.attributes?.structure?.chunks ?? null;
+        const blockUrlTemplate: string | null = json.data?.links?.block ?? null;
+        setMetadata({ shape, chunks, fullUrl, blockUrlTemplate, dims });
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to fetch metadata');
       }
@@ -82,55 +124,81 @@ export function useTiledImage(metadataUrl: string): UseTiledImageResult {
       setLoading(true);
       setError(null);
       try {
-        if (metadata!.shape.length === 1) {
-          // 1D: fetch as JSON and return flat number[]
-          const resp = await fetch(`${metadata!.fullUrl}?format=application/json`);
+        const { shape, fullUrl, blockUrlTemplate } = metadata!;
+
+        if (shape.length === 1) {
+          // 1D → line chart via JSON
+          const resp = await fetchWithTimeout(`${fullUrl}?format=application/json`);
           if (!resp.ok) throw new Error(`Data fetch failed: HTTP ${resp.status}`);
           const data = await resp.json();
-          // Tiled returns the array directly; flatten in case it's nested
           const flat: number[] = Array.isArray(data[0]) ? data.flat() : data;
           if (!cancelled) setLine(flat);
-        } else {
-          // 2D+: build slice for any number of leading dims (handles 2D, 3D, 4D, ...)
-          const leadingShape = metadata!.shape.slice(0, -2);
-          const leadingIndices = flatToMultiIndex(zIndex, leadingShape);
-          const slice = [...leadingIndices.map(String), '::1', '::1'].join(',');
-
-          // Try PNG first (bandwidth efficient)
-          const pngResp = await fetch(`${metadata!.fullUrl}?format=image/png&slice=${slice}`);
-          if (pngResp.ok) {
-            const blob = await pngResp.blob();
-            const bitmap = await createImageBitmap(blob);
-            const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-            const ctx = canvas.getContext('2d');
-            if (!ctx) throw new Error('Could not get canvas 2D context');
-            ctx.drawImage(bitmap, 0, 0);
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const result: number[][] = [];
-            for (let row = 0; row < canvas.height; row++) {
-              const rowData: number[] = [];
-              for (let col = 0; col < canvas.width; col++) {
-                const idx = (row * canvas.width + col) * 4;
-                const r = imageData.data[idx];
-                const g = imageData.data[idx + 1];
-                const b = imageData.data[idx + 2];
-                rowData.push(0.299 * r + 0.587 * g + 0.114 * b);
-              }
-              result.push(rowData);
-            }
-            if (!cancelled) setArray(result);
-          } else {
-            // PNG failed (e.g. unsupported dtype or 4D array) – fall back to JSON
-            const jsonResp = await fetch(`${metadata!.fullUrl}?format=application/json&slice=${slice}`);
-            if (!jsonResp.ok) throw new Error(`Data fetch failed: HTTP ${jsonResp.status}`);
-            const data = await jsonResp.json();
-            // Tiled returns a 2D nested array after the leading-dim slice
-            const result: number[][] = Array.isArray(data[0]) ? data : [data];
-            if (!cancelled) setArray(result);
-          }
+          return;
         }
+
+        // 2D+: compute leading (non-spatial) indices from zIndex
+        const leadingShape = shape.slice(0, -2);
+        const leadingIndices = flatToMultiIndex(zIndex, leadingShape);
+
+        // Prefer block endpoint (what Tiled/finch uses natively)
+        if (blockUrlTemplate) {
+          // Leading dims: map element index → block index using chunk sizes.
+          // Spatial dims: always block 0 (single chunk spans the full image plane).
+          const simpleBlockIndices = [
+            ...leadingIndices,
+            ...shape.slice(-2).map(() => 0),
+          ];
+
+          const pngUrl = buildBlockUrl(blockUrlTemplate, simpleBlockIndices, 'image/png');
+          try {
+            const pngResp = await fetchWithTimeout(pngUrl);
+            if (pngResp.ok) {
+              const result = await decodePng(await pngResp.blob());
+              if (!cancelled) setArray(result);
+              return;
+            }
+          } catch { /* fall through to JSON */ }
+
+          const jsonUrl = buildBlockUrl(blockUrlTemplate, simpleBlockIndices, 'application/json');
+          const jsonResp = await fetchWithTimeout(jsonUrl);
+          if (!jsonResp.ok) throw new Error(`Data fetch failed: HTTP ${jsonResp.status}`);
+          const data = await jsonResp.json();
+          // Block response may be N-dimensional; flatten to 2D
+          const flat2d: number[][] = Array.isArray(data[0])
+            ? (Array.isArray(data[0][0]) ? data.flat(shape.length - 2) : data)
+            : [data];
+          if (!cancelled) setArray(flat2d);
+          return;
+        }
+
+        // Fallback: full endpoint with explicit slice notation
+        const sliceParts = [...leadingIndices.map(String), ...shape.slice(-2).map(() => ':')];
+        const sliceParam = sliceParts.length > 0 ? `&slice=${sliceParts.join(',')}` : '';
+
+        if (shape.length === 2) {
+          try {
+            const pngResp = await fetchWithTimeout(`${fullUrl}?format=image/png${sliceParam}`);
+            if (pngResp.ok) {
+              const result = await decodePng(await pngResp.blob());
+              if (!cancelled) setArray(result);
+              return;
+            }
+          } catch { /* fall through */ }
+        }
+
+        const jsonResp = await fetchWithTimeout(`${fullUrl}?format=application/json${sliceParam}`);
+        if (!jsonResp.ok) throw new Error(`Data fetch failed: HTTP ${jsonResp.status}`);
+        const data = await jsonResp.json();
+        const result: number[][] = Array.isArray(data[0]) ? data : [data];
+        if (!cancelled) setArray(result);
+
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load data');
+        if (!cancelled) {
+          const msg = e instanceof DOMException && e.name === 'AbortError'
+            ? 'Request timed out — server took too long.'
+            : e instanceof Error ? e.message : 'Failed to load data';
+          setError(msg);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
