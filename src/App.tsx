@@ -13,7 +13,7 @@ export default function App() {
   const [inputUrl, setInputUrl] = useState(DEFAULT_SERVER);
   const [panel, setPanel] = useState<Panel | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(380);
-  const [runsHeight, setRunsHeight] = useState(250);
+  const [runsHeight, setRunsHeight] = useState(() => Math.round((window.innerHeight - 64) * 3 / 5));
   const [catalogs, setCatalogs] = useState<string[]>([]);
   const [selectedCatalog, setSelectedCatalog] = useState('');
   const [selectedRunId, setSelectedRunId] = useState('');
