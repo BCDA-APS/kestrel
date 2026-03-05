@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import RunTable from './components/RunTable';
-import FieldSelector from './components/FieldSelector';
+import FieldSelector, { type FieldSelectorHandle } from './components/FieldSelector';
 import VisualizationPanel from './components/VisualizationPanel';
 import type { Panel, XYTrace } from './types';
 
@@ -21,6 +21,7 @@ export default function App() {
   const [selectedRunDetectors, setSelectedRunDetectors] = useState<string[]>([]);
   const [selectedRunMotors, setSelectedRunMotors] = useState<string[]>([]);
   const [runPage, setRunPage] = useState(0);
+  const fieldSelectorRef = useRef<FieldSelectorHandle>(null);
 
   const toProxyUrl = toProxyUrlStatic;
 
@@ -161,12 +162,20 @@ export default function App() {
                   serverUrl={serverUrl}
                   catalog={selectedCatalog}
                   page={runPage}
+                  selectedRunId={selectedRunId}
                   onPageChange={setRunPage}
                   onSelectRun={(id, label, dets, motors) => {
                     setSelectedRunId(id);
                     setSelectedRunLabel(label);
                     setSelectedRunDetectors(dets);
                     setSelectedRunMotors(motors);
+                  }}
+                  onDoubleClickRun={(id, label, dets, motors) => {
+                    setSelectedRunId(id);
+                    setSelectedRunLabel(label);
+                    setSelectedRunDetectors(dets);
+                    setSelectedRunMotors(motors);
+                    fieldSelectorRef.current?.schedulePlot();
                   }}
                 />
               </div>
@@ -179,6 +188,7 @@ export default function App() {
                   />
                   <div className="flex-1 overflow-hidden">
                     <FieldSelector
+                      ref={fieldSelectorRef}
                       serverUrl={serverUrl}
                       catalog={selectedCatalog}
                       runId={selectedRunId}

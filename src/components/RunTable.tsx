@@ -15,8 +15,10 @@ type RunTableProps = {
   serverUrl: string;
   catalog: string;
   page: number;
+  selectedRunId?: string;
   onPageChange: (page: number) => void;
   onSelectRun: (runId: string, label: string, detectors: string[], motors: string[]) => void;
+  onDoubleClickRun?: (runId: string, label: string, detectors: string[], motors: string[]) => void;
 };
 
 type Filters = {
@@ -157,7 +159,7 @@ function DualRangeSlider({ minMs, maxMs, fromMs, toMs, onFromChange, onToChange 
   );
 }
 
-export default function RunTable({ serverUrl, catalog, page, onPageChange, onSelectRun }: RunTableProps) {
+export default function RunTable({ serverUrl, catalog, page, selectedRunId, onPageChange, onSelectRun, onDoubleClickRun }: RunTableProps) {
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -341,7 +343,8 @@ export default function RunTable({ serverUrl, catalog, page, onPageChange, onSel
                 <tr
                   key={run.id}
                   onClick={() => onSelectRun(run.id, run.scanId != null ? String(run.scanId) : '', run.detectorList, run.motorList)}
-                  className={`cursor-pointer hover:bg-sky-50 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}
+                  onDoubleClick={() => onDoubleClickRun?.(run.id, run.scanId != null ? String(run.scanId) : '', run.detectorList, run.motorList)}
+                  className={`cursor-pointer ${run.id === selectedRunId ? 'bg-sky-100 hover:bg-sky-100' : `hover:bg-sky-50 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}`}
                 >
                   <td className={tdClass}>{run.scanId ?? '—'}</td>
                   <td className={tdClass}>{run.planName ?? '—'}</td>

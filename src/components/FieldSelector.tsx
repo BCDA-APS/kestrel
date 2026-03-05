@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, forwardRef, useImperativeHandle } from 'react';
 import type { XYTrace } from '../types';
 
 type FieldInfo = {
@@ -17,11 +17,13 @@ type FieldSelectorProps = {
   onAddTraces: ((traces: XYTrace[]) => void) | null;
 };
 
-export default function FieldSelector({
+export type FieldSelectorHandle = { schedulePlot: () => void };
+
+const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(function FieldSelector({
   serverUrl, catalog, runId, runLabel,
   runDetectors, runMotors,
   onPlot, onAddTraces,
-}: FieldSelectorProps) {
+}, ref) {
   const [streams, setStreams] = useState<string[]>([]);
   const [selectedStream, setSelectedStream] = useState('');
   const [fields, setFields] = useState<FieldInfo[]>([]);
@@ -32,6 +34,7 @@ export default function FieldSelector({
   const lastYRef = useRef<string[]>([]);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState('');
+  const [pendingPlot, setPendingPlot] = useState(false);
 
   // Fetch streams for this run
   useEffect(() => {
@@ -169,6 +172,17 @@ export default function FieldSelector({
     }
   };
 
+  // Fire plot once fields are ready when triggered by double-click
+  useEffect(() => {
+    if (pendingPlot && !loading && xField && yFields.length > 0) {
+      setPendingPlot(false);
+      handlePlot();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingPlot, loading, xField, yFields]);
+
+  useImperativeHandle(ref, () => ({ schedulePlot: () => setPendingPlot(true) }), []);
+
   const handleAddTraces = async () => {
     if (!xField || yFields.length === 0 || adding || !onAddTraces) return;
     setAdding(true);
@@ -283,4 +297,6 @@ export default function FieldSelector({
       </div>
     </div>
   );
-}
+});
+
+export default FieldSelector;
