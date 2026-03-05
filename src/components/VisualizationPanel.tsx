@@ -1,4 +1,4 @@
-import { PlotlyHeatmap } from '@blueskyproject/finch';
+import { PlotlyHeatmap, PlotlyScatter } from '@blueskyproject/finch';
 import { useTiledImage } from '../hooks/useTiledImage';
 import type { Panel } from '../types';
 
@@ -8,9 +8,11 @@ type VisualizationPanelProps = {
 };
 
 export default function VisualizationPanel({ panel, onRemove }: VisualizationPanelProps) {
-  const { array, metadata, zIndex, setZIndex, loading, error } = useTiledImage(panel.url);
-  const is3D = (metadata?.shape.length ?? 0) >= 3;
-  const zMax = is3D ? (metadata!.shape[0] - 1) : 0;
+  const { array, line, metadata, zIndex, setZIndex, loading, error } = useTiledImage(panel.url);
+  const leadingShape = metadata ? metadata.shape.slice(0, -2) : [];
+  const totalFrames = leadingShape.reduce((a, b) => a * b, 1);
+  const is3D = totalFrames > 1;
+  const zMax = Math.max(0, totalFrames - 1);
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 flex flex-col overflow-hidden h-full min-h-[400px]">
@@ -63,6 +65,17 @@ export default function VisualizationPanel({ panel, onRemove }: VisualizationPan
           </div>
         )}
 
+        {line && (
+          <div className="w-full h-full">
+            <PlotlyScatter
+              data={[{ y: line, mode: 'lines', type: 'scatter' }]}
+              xAxisTitle={metadata?.dims?.at(-1) ?? 'Index'}
+              yAxisTitle="Value"
+              className="w-full h-full"
+            />
+          </div>
+        )}
+
         {array && (
           <div className="w-full h-full">
             <PlotlyHeatmap
@@ -76,7 +89,7 @@ export default function VisualizationPanel({ panel, onRemove }: VisualizationPan
           </div>
         )}
 
-        {!array && !loading && !error && (
+        {!line && !array && !loading && !error && (
           <p className="text-sm text-gray-400">Fetching dataset...</p>
         )}
       </div>

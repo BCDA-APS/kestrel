@@ -1,21 +1,28 @@
 import { useState, useCallback, useEffect } from 'react';
 import DatasetBrowser from './components/DatasetBrowser';
+import RunTable from './components/RunTable';
 import VisualizationGrid from './components/VisualizationGrid';
 import type { Panel } from './types';
 
 export default function App() {
-  const [serverUrl, setServerUrl] = useState('');
-  const [inputUrl, setInputUrl] = useState('');
+  const DEFAULT_SERVER = 'http://nefarian.xray.aps.anl.gov:8020';
+  const toProxyUrlStatic = (url: string) =>
+    url.replace(/^(https?):\/\//, `${window.location.origin}/tiled-proxy/$1/`);
+
+  const [serverUrl, setServerUrl] = useState(() => toProxyUrlStatic(DEFAULT_SERVER));
+  const [inputUrl, setInputUrl] = useState(DEFAULT_SERVER);
   const [panels, setPanels] = useState<Panel[]>([]);
-  const [sidebarWidth, setSidebarWidth] = useState(320);
+  const [sidebarWidth, setSidebarWidth] = useState(380);
   const [catalogs, setCatalogs] = useState<string[]>([]);
   const [selectedCatalog, setSelectedCatalog] = useState('');
+  const [selectedRunId, setSelectedRunId] = useState('');
+  const [runPage, setRunPage] = useState(0);
 
-  const toProxyUrl = (url: string) =>
-    url.replace(/^(https?):\/\//, `${window.location.origin}/tiled-proxy/$1/`);
+  const toProxyUrl = toProxyUrlStatic;
 
   const handleConnect = () => {
     setSelectedCatalog('');
+    setSelectedRunId('');
     setServerUrl(toProxyUrl(inputUrl));
   };
 
@@ -62,6 +69,13 @@ export default function App() {
     document.addEventListener('mouseup', onMouseUp);
   }, [sidebarWidth]);
 
+  // Show run table when a catalog is selected but no run is chosen yet
+  const showRunTable = !!selectedCatalog && !selectedRunId;
+  // Show dataset browser when a run is selected (or no catalog chosen)
+  const initialPath = selectedCatalog && selectedRunId
+    ? `${selectedCatalog}/${selectedRunId}`
+    : selectedCatalog || undefined;
+
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-gray-50">
       {/* Header */}
@@ -89,7 +103,7 @@ export default function App() {
               <label className="text-sky-300 text-xs font-medium">Catalog</label>
               <select
                 value={selectedCatalog}
-                onChange={(e) => setSelectedCatalog(e.target.value)}
+                onChange={(e) => { setSelectedCatalog(e.target.value); setSelectedRunId(''); setRunPage(0); }}
                 className="bg-sky-900 text-white text-sm px-3 py-1.5 rounded border border-sky-700 focus:outline-none focus:border-sky-400"
               >
                 <option value="">— root —</option>
@@ -106,15 +120,26 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
         <aside
-          className="flex-none bg-white overflow-y-auto flex flex-col"
+          className="flex-none bg-white overflow-hidden flex flex-col"
           style={{ width: sidebarWidth }}
         >
-          <DatasetBrowser
-            key={serverUrl + selectedCatalog}
-            serverUrl={serverUrl}
-            initialPath={selectedCatalog}
-            onSelectDataset={addPanel}
-          />
+          {showRunTable ? (
+            <RunTable
+              serverUrl={serverUrl}
+              catalog={selectedCatalog}
+              page={runPage}
+              onPageChange={setRunPage}
+              onSelectRun={(id) => setSelectedRunId(id)}
+            />
+          ) : (
+            <DatasetBrowser
+              key={serverUrl + (initialPath ?? '')}
+              serverUrl={serverUrl}
+              initialPath={initialPath}
+              onBack={selectedRunId ? () => setSelectedRunId('') : undefined}
+              onSelectDataset={addPanel}
+            />
+          )}
         </aside>
 
         {/* Drag handle */}
