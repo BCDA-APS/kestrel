@@ -80,28 +80,30 @@ const msToLocal = (ms: number) => new Date(ms).toISOString().slice(0, 16);
 //   Key("time") >= ts       →  filter[comparison][condition][operator/key/value]  (Comparison)
 //   FullText(v)             →  filter[fulltext][condition][text]
 // Values must be JSON-encoded (the Tiled REST API expects JSONSerializable values).
+// keyPrefix: 'start.' for tiled 0.2.8+ (nested), '' for tiled 0.2.3 (flat).
 // All filtering happens server-side — no batch-fetching the full catalog.
-function buildFilterQs(f: Filters): URLSearchParams {
+function buildFilterQs(f: Filters, keyPrefix: string): URLSearchParams {
   const qs = new URLSearchParams();
+  const k = (name: string) => keyPrefix + name;
 
   // Exact key match (tiled.queries.Eq) — value must be JSON-encoded
   if (f.planName) {
-    qs.append('filter[eq][condition][key]', 'plan_name');
+    qs.append('filter[eq][condition][key]', k('plan_name'));
     qs.append('filter[eq][condition][value]', JSON.stringify(f.planName));
   }
   if (f.scanId) {
     const numVal = parseInt(f.scanId, 10);
-    qs.append('filter[eq][condition][key]', 'scan_id');
+    qs.append('filter[eq][condition][key]', k('scan_id'));
     qs.append('filter[eq][condition][value]', isNaN(numVal) ? JSON.stringify(f.scanId) : String(numVal));
   }
 
   // List containment (tiled.queries.Contains) — value must be JSON-encoded
   if (f.detector) {
-    qs.append('filter[contains][condition][key]', 'detectors');
+    qs.append('filter[contains][condition][key]', k('detectors'));
     qs.append('filter[contains][condition][value]', JSON.stringify(f.detector));
   }
   if (f.positioner) {
-    qs.append('filter[contains][condition][key]', 'motors');
+    qs.append('filter[contains][condition][key]', k('motors'));
     qs.append('filter[contains][condition][value]', JSON.stringify(f.positioner));
   }
 
@@ -109,13 +111,13 @@ function buildFilterQs(f: Filters): URLSearchParams {
   if (f.since) {
     const ts = Math.floor(new Date(f.since).getTime() / 1000);
     qs.append('filter[comparison][condition][operator]', 'ge');
-    qs.append('filter[comparison][condition][key]', 'time');
+    qs.append('filter[comparison][condition][key]', k('time'));
     qs.append('filter[comparison][condition][value]', String(ts));
   }
   if (f.until) {
     const ts = Math.floor(new Date(f.until).getTime() / 1000);
     qs.append('filter[comparison][condition][operator]', 'le');
-    qs.append('filter[comparison][condition][key]', 'time');
+    qs.append('filter[comparison][condition][key]', k('time'));
     qs.append('filter[comparison][condition][value]', String(ts));
   }
 
@@ -195,6 +197,19 @@ export default function RunTable({ serverUrl, catalog, page, selectedRunId, auto
   const [minDateMs, setMinDateMs] = useState(new Date('2000-01-01').getTime());
   const [refreshKey, setRefreshKey] = useState(0);
   const bgRefreshRef = useRef(false);
+  // keyPrefix: 'start.' for tiled 0.2.8+ (nested metadata keys), '' for tiled 0.2.3 (flat).
+  // null = not yet detected.
+  const [keyPrefix, setKeyPrefix] = useState<string | null>(null);
+
+  // Detect filter key format by probing with a nested key (start.scan_id).
+  // tiled 0.2.8+ returns OK (even 0 results); older tiled returns 500.
+  useEffect(() => {
+    if (!serverUrl || !catalog) return;
+    setKeyPrefix(null);
+    fetch(`${serverUrl}/api/v1/search/${catalog}?page[limit]=1&filter[eq][condition][key]=start.scan_id&filter[eq][condition][value]=0`)
+      .then(r => setKeyPrefix(r.ok ? 'start.' : ''))
+      .catch(() => setKeyPrefix(''));
+  }, [serverUrl, catalog]);
 
   // Fetch the oldest run's timestamp to set the slider minimum
   useEffect(() => {
@@ -266,13 +281,13 @@ export default function RunTable({ serverUrl, catalog, page, selectedRunId, auto
   }, [filterKey]);
 
   useEffect(() => {
-    if (!serverUrl || !catalog) { setRuns([]); setTotal(0); return; }
+    if (!serverUrl || !catalog || keyPrefix === null) { setRuns([]); setTotal(0); return; }
     let cancelled = false;
     const isBg = bgRefreshRef.current;
     bgRefreshRef.current = false;
     if (!isBg) { setLoading(true); setFilterError(''); }
 
-    const extra = buildFilterQs(debouncedFilters);
+    const extra = buildFilterQs(debouncedFilters, keyPrefix);
 
     (async () => {
       try {
@@ -318,7 +333,7 @@ export default function RunTable({ serverUrl, catalog, page, selectedRunId, auto
     })();
 
     return () => { cancelled = true; };
-  }, [serverUrl, catalog, page, filterKey, refreshKey]);
+  }, [serverUrl, catalog, page, filterKey, refreshKey, keyPrefix]);
 
   const [showFilters, setShowFilters] = useState(false);
   const lastPage = Math.max(0, Math.ceil(total / PAGE_SIZE) - 1);
