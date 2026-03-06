@@ -10,6 +10,7 @@ type RunRow = {
   detectorList: string[];
   motorList: string[];
   date?: string;
+  startTime?: number;
   status?: string;
   acquiring: boolean;
 };
@@ -62,6 +63,7 @@ function parseRun(item: Record<string, unknown>): RunRow {
     detectorList,
     motorList,
     date,
+    startTime:    typeof start.time === 'number' ? start.time : undefined,
     status:       stop?.exit_status,
     acquiring:    !stop,
   };
@@ -71,42 +73,57 @@ const DAY_MS = 86_400_000;
 const msToLocal = (ms: number) => new Date(ms).toISOString().slice(0, 16);
 
 
+// Build Tiled server-side filter query params.
+// Uses the same query types as the tiled Python client (tiled.queries.*):
+//   Key("plan_name") == v   →  filter[eq][condition][key/value]        (Eq)
+//   Contains("detectors",v) →  filter[contains][condition][key/value]  (Contains)
+//   Key("time") >= ts       →  filter[comparison][condition][operator/key/value]  (Comparison)
+//   FullText(v)             →  filter[fulltext][condition][text]
+// Values must be JSON-encoded (the Tiled REST API expects JSONSerializable values).
+// All filtering happens server-side — no batch-fetching the full catalog.
 function buildFilterQs(f: Filters): URLSearchParams {
   const qs = new URLSearchParams();
-  if (f.scanId) {
-    const n = Number(f.scanId);
-    if (Number.isFinite(n)) {
-      qs.append('filter[eq][condition][key]',   'scan_id');
-      qs.append('filter[eq][condition][value]',  JSON.stringify(n));
-    }
-  }
+
+  // Exact key match (tiled.queries.Eq) — value must be JSON-encoded
   if (f.planName) {
-    qs.append('filter[eq][condition][key]',   'plan_name');
-    qs.append('filter[eq][condition][value]',  JSON.stringify(f.planName));
+    qs.append('filter[eq][condition][key]', 'plan_name');
+    qs.append('filter[eq][condition][value]', JSON.stringify(f.planName));
   }
+  if (f.scanId) {
+    const numVal = parseInt(f.scanId, 10);
+    qs.append('filter[eq][condition][key]', 'scan_id');
+    qs.append('filter[eq][condition][value]', isNaN(numVal) ? JSON.stringify(f.scanId) : String(numVal));
+  }
+
+  // List containment (tiled.queries.Contains) — value must be JSON-encoded
   if (f.detector) {
-    qs.append('filter[eq][condition][key]',   'detectors');
-    qs.append('filter[eq][condition][value]',  JSON.stringify(f.detector));
+    qs.append('filter[contains][condition][key]', 'detectors');
+    qs.append('filter[contains][condition][value]', JSON.stringify(f.detector));
   }
   if (f.positioner) {
-    qs.append('filter[eq][condition][key]',   'motors');
-    qs.append('filter[eq][condition][value]',  JSON.stringify(f.positioner));
+    qs.append('filter[contains][condition][key]', 'motors');
+    qs.append('filter[contains][condition][value]', JSON.stringify(f.positioner));
   }
-  if (f.text) {
-    qs.append('filter[fulltext][condition][text]', f.text);
-  }
+
+  // Time range (tiled.queries.Comparison) — operator field required, "ge"/"le" not "gte"/"lte"
   if (f.since) {
     const ts = Math.floor(new Date(f.since).getTime() / 1000);
     qs.append('filter[comparison][condition][operator]', 'ge');
-    qs.append('filter[comparison][condition][key]',      'time');
-    qs.append('filter[comparison][condition][value]',    JSON.stringify(ts));
+    qs.append('filter[comparison][condition][key]', 'time');
+    qs.append('filter[comparison][condition][value]', String(ts));
   }
   if (f.until) {
     const ts = Math.floor(new Date(f.until).getTime() / 1000);
     qs.append('filter[comparison][condition][operator]', 'le');
-    qs.append('filter[comparison][condition][key]',      'time');
-    qs.append('filter[comparison][condition][value]',    JSON.stringify(ts));
+    qs.append('filter[comparison][condition][key]', 'time');
+    qs.append('filter[comparison][condition][value]', String(ts));
   }
+
+  // Full-text search (tiled.queries.FullText)
+  if (f.text) {
+    qs.append('filter[fulltext][condition][text]', f.text);
+  }
+
   return qs;
 }
 
@@ -172,6 +189,7 @@ export default function RunTable({ serverUrl, catalog, page, selectedRunId, auto
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [filterError, setFilterError] = useState('');
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [debouncedFilters, setDebouncedFilters] = useState<Filters>(EMPTY_FILTERS);
   const [minDateMs, setMinDateMs] = useState(new Date('2000-01-01').getTime());
@@ -252,43 +270,50 @@ export default function RunTable({ serverUrl, catalog, page, selectedRunId, auto
     let cancelled = false;
     const isBg = bgRefreshRef.current;
     bgRefreshRef.current = false;
-    if (!isBg) setLoading(true);
+    if (!isBg) { setLoading(true); setFilterError(''); }
 
     const extra = buildFilterQs(debouncedFilters);
 
     (async () => {
       try {
-        // Step 1: get (filtered) total count
-        const countQs = new URLSearchParams({ 'page[limit]': '1', 'page[offset]': '0' });
-        extra.forEach((v, k) => countQs.append(k, v));
-        const r1 = await fetch(`${serverUrl}/api/v1/search/${catalog}?${countQs}`);
-        if (cancelled || !r1.ok) { setRuns([]); setTotal(0); return; }
-        const j1 = await r1.json();
-        const t: number = j1.meta?.count ?? j1.meta?.pagination?.count ?? 0;
-        if (cancelled) return;
-        setTotal(t);
-        if (t === 0) { setRuns([]); return; }
-
-        // Step 2: fetch the right page in reverse order (most recent first)
-        const lastPage = Math.max(0, Math.ceil(t / PAGE_SIZE) - 1);
-        const safePage = Math.min(page, lastPage);
-        const reversedLimit = Math.min(PAGE_SIZE, t - safePage * PAGE_SIZE);
-        const reversedOffset = Math.max(0, t - safePage * PAGE_SIZE - reversedLimit);
-        const pageQs = new URLSearchParams({
-          'page[limit]':  String(reversedLimit),
-          'page[offset]': String(reversedOffset),
-        });
-        extra.forEach((v, k) => pageQs.append(k, v));
-        const r2 = await fetch(`${serverUrl}/api/v1/search/${catalog}?${pageQs}`);
-        if (cancelled || !r2.ok) return;
-        const j2 = await r2.json();
-        if (cancelled) return;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setRuns([...(j2.data ?? []).map((item: any) => parseRun(item))].reverse());
+        {
+          // All filters are sent server-side (Tiled filter[eq]/[contains]/[ge]/[le]/[fulltext]).
+          // No batch-fetching — just normal paginated fetch with server-side filter params.
+          const countQs = new URLSearchParams({ 'page[limit]': '1', 'page[offset]': '0' });
+          extra.forEach((v, k) => countQs.append(k, v));
+          const r1 = await fetch(`${serverUrl}/api/v1/search/${catalog}?${countQs}`);
+          if (cancelled) return;
+          if (!r1.ok) {
+            if (r1.status === 500) {
+              setFilterError('Filter not supported by this server. Try "search metadata" instead.');
+            }
+            setRuns([]); setTotal(0); return;
+          }
+          const j1 = await r1.json();
+          const t: number = j1.meta?.count ?? j1.meta?.pagination?.count ?? 0;
+          if (cancelled) return;
+          setTotal(t);
+          if (t === 0) { setRuns([]); return; }
+          const lastPage = Math.max(0, Math.ceil(t / PAGE_SIZE) - 1);
+          const safePage = Math.min(page, lastPage);
+          const reversedLimit = Math.min(PAGE_SIZE, t - safePage * PAGE_SIZE);
+          const reversedOffset = Math.max(0, t - safePage * PAGE_SIZE - reversedLimit);
+          const pageQs = new URLSearchParams({
+            'page[limit]':  String(reversedLimit),
+            'page[offset]': String(reversedOffset),
+          });
+          extra.forEach((v, k) => pageQs.append(k, v));
+          const r2 = await fetch(`${serverUrl}/api/v1/search/${catalog}?${pageQs}`);
+          if (cancelled || !r2.ok) return;
+          const j2 = await r2.json();
+          if (cancelled) return;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          setRuns([...(j2.data ?? []).map((item: any) => parseRun(item))].reverse());
+        }
       } catch {
         // ignore
       } finally {
-        if (!cancelled && !isBg) setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
 
@@ -341,12 +366,17 @@ export default function RunTable({ serverUrl, catalog, page, selectedRunId, auto
       {/* Collapsible filter panel */}
       {showFilters && (
         <div className="shrink-0 border-b border-gray-200 bg-gray-50 px-3 py-2 space-y-1">
+          {filterError && (
+            <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+              {filterError}
+            </div>
+          )}
           {([
             ['ID',     'scanId',     'exact'],
             ['Plan',   'planName',   'exact'],
             ['Det',    'detector',   'exact'],
             ['Pos',    'positioner', 'exact'],
-            ['Search', 'text',       'full-text'],
+            ['Search', 'text',       'search metadata'],
           ] as [string, keyof Filters, string][]).map(([label, field, ph]) => (
             <div key={field} className="flex items-center gap-2">
               <span className={labelCls}>{label}</span>
@@ -407,7 +437,7 @@ export default function RunTable({ serverUrl, catalog, page, selectedRunId, auto
             <tbody>
               {runs.map((run, i) => (
                 <tr
-                  key={run.id}
+                  key={run.id || i}
                   onClick={() => onSelectRun(run.id, run.scanId != null ? String(run.scanId) : '', run.detectorList, run.motorList, run.acquiring)}
                   onDoubleClick={() => onDoubleClickRun?.(run.id, run.scanId != null ? String(run.scanId) : '', run.detectorList, run.motorList, run.acquiring)}
                   className={`cursor-pointer ${run.id === selectedRunId ? 'bg-sky-100 hover:bg-sky-100' : `hover:bg-sky-50 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}`}
@@ -451,7 +481,6 @@ export default function RunTable({ serverUrl, catalog, page, selectedRunId, auto
         <div className="flex-none border-t border-gray-200 bg-white px-3 py-2 flex items-center justify-between shrink-0">
           <span className="text-xs text-gray-500">
             {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total}
-            {isFiltering && <span className="text-gray-400"> filtered</span>}
           </span>
           <div className="flex gap-1">
             {(['«', '‹', '›', '»'] as const).map((arrow) => {

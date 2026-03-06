@@ -2,7 +2,31 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import RunTable from './components/RunTable';
 import FieldSelector, { type FieldSelectorHandle } from './components/FieldSelector';
 import VisualizationPanel from './components/VisualizationPanel';
-import type { Panel, XYTrace } from './types';
+import AnalysisPanel from './components/AnalysisPanel';
+import type { Panel, XYTrace, TraceStyle } from './types';
+import { fitData, MODEL_NAMES } from './fitting';
+import type { FitResult } from './fitting';
+
+function computeDerivative(xs: number[], ys: number[], w: number): { x: number[]; y: number[] } {
+  if (xs.length < 2) return { x: [], y: [] };
+  const order = xs.map((_, i) => i).sort((a, b) => xs[a] - xs[b]);
+  const sx = order.map(i => xs[i]);
+  const sy = order.map(i => ys[i]);
+  const half = Math.floor(w / 2);
+  const smooth = w > 1
+    ? sy.map((_, i) => {
+        const s = Math.max(0, i - half), e = Math.min(sy.length - 1, i + half);
+        let sum = 0; for (let j = s; j <= e; j++) sum += sy[j];
+        return sum / (e - s + 1);
+      })
+    : sy;
+  const n = sx.length;
+  const dy = sx.map((_, i) => {
+    const i0 = Math.max(0, i - 1), i1 = Math.min(n - 1, i + 1);
+    return (smooth[i1] - smooth[i0]) / (sx[i1] - sx[i0]);
+  });
+  return { x: sx, y: dy };
+}
 
 export default function App() {
   const DEFAULT_SERVER = 'http://nefarian.xray.aps.anl.gov:8000';
@@ -23,7 +47,112 @@ export default function App() {
   const [selectedRunAcquiring, setSelectedRunAcquiring] = useState(false);
   const [runPage, setRunPage] = useState(0);
   const [autoFollow, setAutoFollow] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [analysisCollapsed, setAnalysisCollapsed] = useState(false);
+  const [analysisWidth, setAnalysisWidth] = useState(260);
+  const [analysisHeight, setAnalysisHeight] = useState(200);
+  const [analysisPosition, setAnalysisPosition] = useState<'right' | 'bottom'>('right');
+  const [xLog, setXLog] = useState(false);
+  const [yLog, setYLog] = useState(false);
+  const [fitModel, setFitModel] = useState(MODEL_NAMES[0]);
+  const [activeTraceIndex, setActiveTraceIndex] = useState(0);
+  const [fitResults, setFitResults] = useState<FitResult | null>(null);
+  const [showDerivative, setShowDerivative] = useState(false);
+  const [smoothingWindow, setSmoothingWindow] = useState(1);
+  const [traceStyles, setTraceStyles] = useState<TraceStyle[]>([]);
+  const [cursor1, setCursor1] = useState<number | null>(null);
+  const [cursor1Y, setCursor1Y] = useState<number | null>(null);
+  const [cursor2, setCursor2] = useState<number | null>(null);
+  const [cursor2Y, setCursor2Y] = useState<number | null>(null);
+  const [snapToData, setSnapToData] = useState(true);
+  const [fitBetweenCursors, setFitBetweenCursors] = useState(false);
   const fieldSelectorRef = useRef<FieldSelectorHandle>(null);
+
+  const [derivativeTraces, setDerivativeTraces] = useState<XYTrace[]>([]);
+  // Track derivative source by identity so adding/removing other traces doesn't shift it
+  const [derivSourceKey, setDerivSourceKey] = useState<string | null>(null);
+
+  const realTraces = panel?.type === 'xy' ? panel.traces : [];
+
+  // Resolve derivative source: prefer key lookup, fall back to current real active index
+  const derivSource = (() => {
+    if (realTraces.length === 0) return null;
+    if (derivSourceKey) {
+      return realTraces.find(t => `${t.runId}|${t.yLabel}` === derivSourceKey) ?? realTraces[0];
+    }
+    return realTraces[Math.min(activeTraceIndex, realTraces.length - 1)] ?? null;
+  })();
+
+  useEffect(() => {
+    if (!showDerivative || !derivSource || derivSource.x.length < 2) {
+      setDerivativeTraces([]);
+      return;
+    }
+    const deriv = computeDerivative(derivSource.x, derivSource.y, smoothingWindow);
+    setDerivativeTraces([{
+      x: deriv.x, y: deriv.y,
+      xLabel: derivSource.xLabel,
+      yLabel: `d/dx (${derivSource.runLabel} - ${derivSource.yLabel})`,
+      runLabel: derivSource.runLabel,
+      runId: `__deriv__:${derivSource.runId}`,
+    }]);
+  }, [showDerivative, smoothingWindow, derivSource]);
+
+  const allTraces = [...realTraces, ...derivativeTraces];
+  const activeTrace = allTraces[Math.min(activeTraceIndex, allTraces.length - 1)] ?? null;
+
+  const handleActiveTraceIndexChange = useCallback((i: number) => {
+    setActiveTraceIndex(i);
+    setFitResults(null);
+    if (i < realTraces.length) {
+      // User selected a real trace — lock derivative source to it
+      const t = realTraces[i];
+      setDerivSourceKey(`${t.runId}|${t.yLabel}`);
+    } else if (!derivSourceKey && derivSource) {
+      // User selected derivative — lock in current source so new traces don't shift it
+      setDerivSourceKey(`${derivSource.runId}|${derivSource.yLabel}`);
+    }
+  }, [realTraces, derivSourceKey, derivSource]);
+
+  const handleTraceStyleChange = useCallback((i: number, patch: Partial<TraceStyle>) => {
+    setTraceStyles(prev => {
+      const next = [...prev];
+      next[i] = { color: '', lineWidth: 2, lineDash: 'solid', markerSymbol: 'circle', ...(next[i] ?? {}), ...patch };
+      return next;
+    });
+  }, []);
+
+  const handlePlotClick = useCallback((dataX: number, dataY: number, cursorIdx: 0 | 1) => {
+    let x = dataX, y = dataY;
+    if (snapToData && activeTrace && activeTrace.x.length > 0) {
+      let nearest = 0, minDist = Infinity;
+      for (let i = 0; i < activeTrace.x.length; i++) {
+        const d = Math.abs(activeTrace.x[i] - dataX);
+        if (d < minDist) { minDist = d; nearest = i; }
+      }
+      x = activeTrace.x[nearest];
+      y = activeTrace.y[nearest];
+    }
+    if (cursorIdx === 0) {
+      setCursor1(x); setCursor1Y(y);
+    } else {
+      setCursor2(x); setCursor2Y(y);
+    }
+  }, [snapToData, activeTrace]);
+
+  const handleFit = useCallback(() => {
+    if (!activeTrace) return;
+    let xs = activeTrace.x, ys = activeTrace.y;
+    if (fitBetweenCursors && cursor1 != null && cursor2 != null) {
+      const xMin = Math.min(cursor1, cursor2), xMax = Math.max(cursor1, cursor2);
+      const pairs = xs.map((x, i) => [x, ys[i]] as [number, number]).filter(([x]) => x >= xMin && x <= xMax);
+      xs = pairs.map(([x]) => x);
+      ys = pairs.map(([, y]) => y);
+    }
+    if (xs.length < 2) return;
+    const result = fitData(fitModel, xs, ys);
+    setFitResults(result);
+  }, [activeTrace, fitModel, fitBetweenCursors, cursor1, cursor2]);
 
   const toProxyUrl = toProxyUrlStatic;
 
@@ -66,6 +195,18 @@ export default function App() {
     });
   }, []);
 
+  const handleLiveTracesUpdate = useCallback((updated: XYTrace[]) => {
+    setPanel(prev => {
+      if (!prev || prev.type !== 'xy') return prev;
+      const updatedKeys = new Set(updated.map(t => `${t.runId}|${t.xLabel}|${t.yLabel}`));
+      const merged = prev.traces.map(t => {
+        const key = `${t.runId}|${t.xLabel}|${t.yLabel}`;
+        return updatedKeys.has(key) ? (updated.find(u => `${u.runId}|${u.xLabel}|${u.yLabel}` === key) ?? t) : t;
+      });
+      return { ...prev, traces: merged };
+    });
+  }, []);
+
   const addTraces = useCallback((traces: XYTrace[]) => {
     setPanel((prev) => {
       if (!prev || prev.type !== 'xy') return prev;
@@ -101,6 +242,46 @@ export default function App() {
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
   }, [sidebarWidth]);
+
+  const handleAnalysisDividerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = analysisWidth;
+
+    const onMouseMove = (e: MouseEvent) => {
+      // dragging left increases width (panel is on the right)
+      const newWidth = Math.max(240, Math.min(600, startWidth - (e.clientX - startX)));
+      setAnalysisWidth(newWidth);
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, [analysisWidth]);
+
+  const handleAnalysisBottomDividerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = analysisHeight;
+
+    const onMouseMove = (e: MouseEvent) => {
+      // dragging up (negative delta) increases height
+      const newHeight = Math.max(100, Math.min(500, startHeight - (e.clientY - startY)));
+      setAnalysisHeight(newHeight);
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, [analysisHeight]);
 
   const handleRunsDividerMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -165,8 +346,8 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
         <aside
-          className="flex-none bg-white overflow-hidden flex flex-col"
-          style={{ width: sidebarWidth }}
+          className="flex-none bg-white overflow-hidden flex flex-col transition-none"
+          style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
         >
           {selectedCatalog ? (
             <>
@@ -244,27 +425,151 @@ export default function App() {
           )}
         </aside>
 
-        {/* Drag handle */}
-        <div
-          className="flex-none w-1 cursor-col-resize bg-gray-200 hover:bg-sky-400 transition-colors"
-          onMouseDown={handleDividerMouseDown}
-        />
-
-        {/* Main content */}
-        <main className="flex-1 overflow-hidden p-4">
-          {panel ? (
-            <VisualizationPanel panel={panel} onRemove={() => setPanel(null)} onRemoveTrace={removeTrace} onStopLive={stopLive} />
-          ) : (
-            <div className="h-full flex flex-col items-center justify-center text-gray-400 select-none">
-              <svg className="h-16 w-16 mb-4 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1}
-                  d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
-              </svg>
-              <p className="text-base font-medium">No plot open</p>
-              <p className="text-sm mt-1">Select X and Y fields on the left and click Plot</p>
-            </div>
+        {/* Drag handle + collapse toggle */}
+        <div className="flex-none flex flex-col items-center relative" style={{ width: 16 }}>
+          {/* Clickable drag strip (only when expanded) */}
+          {!sidebarCollapsed && (
+            <div
+              className="absolute inset-y-0 left-0 w-1 cursor-col-resize bg-gray-200 hover:bg-sky-400 transition-colors"
+              onMouseDown={handleDividerMouseDown}
+            />
           )}
-        </main>
+          {/* Toggle button */}
+          <button
+            onClick={() => setSidebarCollapsed(c => !c)}
+            className="absolute top-1/2 -translate-y-1/2 flex items-center justify-center w-4 h-8 rounded-r bg-gray-200 hover:bg-sky-400 text-gray-600 hover:text-white transition-colors text-xs leading-none select-none"
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {sidebarCollapsed ? '›' : '‹'}
+          </button>
+        </div>
+
+        {analysisPosition === 'right' ? (
+          <>
+            {/* Main content */}
+            <main className="flex-1 overflow-hidden p-4">
+              {panel ? (
+                <VisualizationPanel panel={panel} onRemove={() => { setPanel(null); setFitResults(null); }} onRemoveTrace={removeTrace} onStopLive={stopLive} onLiveTracesUpdate={handleLiveTracesUpdate} extraTraces={derivativeTraces} onRemoveExtraTrace={() => setShowDerivative(false)} xLog={xLog} yLog={yLog} fitResults={fitResults} traceStyles={traceStyles} cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y} onPlotClick={handlePlotClick} />
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-gray-400 select-none">
+                  <svg className="h-16 w-16 mb-4 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1}
+                      d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+                  </svg>
+                  <p className="text-base font-medium">No plot open</p>
+                  <p className="text-sm mt-1">Select X and Y fields on the left and click Plot</p>
+                </div>
+              )}
+            </main>
+
+            {/* Right analysis divider + collapse toggle */}
+            <div className="flex-none flex flex-col items-center relative" style={{ width: 16 }}>
+              {!analysisCollapsed && (
+                <div
+                  className="absolute inset-y-0 right-0 w-1 cursor-col-resize bg-gray-200 hover:bg-sky-400 transition-colors"
+                  onMouseDown={handleAnalysisDividerMouseDown}
+                />
+              )}
+              <button
+                onClick={() => setAnalysisCollapsed(c => !c)}
+                className="absolute top-1/2 -translate-y-1/2 flex items-center justify-center w-4 h-8 rounded-l bg-gray-200 hover:bg-sky-400 text-gray-600 hover:text-white transition-colors text-xs leading-none select-none"
+                title={analysisCollapsed ? 'Expand analysis panel' : 'Collapse analysis panel'}
+              >
+                {analysisCollapsed ? '‹' : '›'}
+              </button>
+            </div>
+
+            {/* Analysis panel right */}
+            <aside
+              className="flex-none bg-white overflow-hidden flex flex-col border-l border-gray-100"
+              style={{ width: analysisCollapsed ? 0 : analysisWidth }}
+            >
+              <AnalysisPanel
+                position="right" onTogglePosition={() => setAnalysisPosition('bottom')}
+                xLog={xLog} yLog={yLog} onXLogChange={setXLog} onYLogChange={setYLog}
+                hasXYPanel={panel?.type === 'xy'}
+                xyTraces={panel?.type === 'xy' ? allTraces.map(t => t.runId.startsWith('__deriv__') ? t.yLabel : `${t.runLabel} (${t.runId.slice(0, 7)}) - ${t.yLabel}`) : []}
+                activeTraceIndex={activeTraceIndex} onActiveTraceIndexChange={handleActiveTraceIndexChange}
+                activeX={activeTrace?.x ?? []} activeY={activeTrace?.y ?? []}
+                showDerivative={showDerivative} onShowDerivativeChange={setShowDerivative}
+                smoothingWindow={smoothingWindow} onSmoothingWindowChange={setSmoothingWindow}
+                fitModel={fitModel} onFitModelChange={m => { setFitModel(m); setFitResults(null); }}
+                fitResults={fitResults} onFit={handleFit} onClearFit={() => setFitResults(null)}
+                cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y}
+                snapToData={snapToData} fitBetweenCursors={fitBetweenCursors}
+                onSnapToDataChange={setSnapToData}
+                onFitBetweenCursorsChange={setFitBetweenCursors}
+                onClearCursor1={() => { setCursor1(null); setCursor1Y(null); }}
+                onClearCursor2={() => { setCursor2(null); setCursor2Y(null); }}
+                onClearAllCursors={() => { setCursor1(null); setCursor1Y(null); setCursor2(null); setCursor2Y(null); }}
+                traceStyles={traceStyles} onTraceStyleChange={handleTraceStyleChange}
+              />
+            </aside>
+          </>
+        ) : (
+          /* Bottom position */
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Main content */}
+            <main className="flex-1 overflow-hidden p-4">
+              {panel ? (
+                <VisualizationPanel panel={panel} onRemove={() => { setPanel(null); setFitResults(null); }} onRemoveTrace={removeTrace} onStopLive={stopLive} onLiveTracesUpdate={handleLiveTracesUpdate} extraTraces={derivativeTraces} onRemoveExtraTrace={() => setShowDerivative(false)} xLog={xLog} yLog={yLog} fitResults={fitResults} traceStyles={traceStyles} cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y} onPlotClick={handlePlotClick} />
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-gray-400 select-none">
+                  <svg className="h-16 w-16 mb-4 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1}
+                      d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+                  </svg>
+                  <p className="text-base font-medium">No plot open</p>
+                  <p className="text-sm mt-1">Select X and Y fields on the left and click Plot</p>
+                </div>
+              )}
+            </main>
+
+            {/* Bottom analysis divider + collapse toggle */}
+            <div className="flex-none flex items-center justify-center relative" style={{ height: 16 }}>
+              {!analysisCollapsed && (
+                <div
+                  className="absolute inset-x-0 top-0 h-1 cursor-row-resize bg-gray-200 hover:bg-sky-400 transition-colors"
+                  onMouseDown={handleAnalysisBottomDividerMouseDown}
+                />
+              )}
+              <button
+                onClick={() => setAnalysisCollapsed(c => !c)}
+                className="absolute left-1/2 -translate-x-1/2 flex items-center justify-center h-4 w-8 rounded-b bg-gray-200 hover:bg-sky-400 text-gray-600 hover:text-white transition-colors text-xs leading-none select-none"
+                title={analysisCollapsed ? 'Expand analysis panel' : 'Collapse analysis panel'}
+              >
+                {analysisCollapsed ? '∧' : '∨'}
+              </button>
+            </div>
+
+            {/* Analysis panel bottom */}
+            <aside
+              className="flex-none bg-white overflow-hidden flex flex-col border-t border-gray-100"
+              style={{ height: analysisCollapsed ? 0 : analysisHeight }}
+            >
+              <AnalysisPanel
+                position="bottom" onTogglePosition={() => setAnalysisPosition('right')}
+                xLog={xLog} yLog={yLog} onXLogChange={setXLog} onYLogChange={setYLog}
+                hasXYPanel={panel?.type === 'xy'}
+                xyTraces={panel?.type === 'xy' ? allTraces.map(t => t.runId.startsWith('__deriv__') ? t.yLabel : `${t.runLabel} (${t.runId.slice(0, 7)}) - ${t.yLabel}`) : []}
+                activeTraceIndex={activeTraceIndex} onActiveTraceIndexChange={handleActiveTraceIndexChange}
+                activeX={activeTrace?.x ?? []} activeY={activeTrace?.y ?? []}
+                showDerivative={showDerivative} onShowDerivativeChange={setShowDerivative}
+                smoothingWindow={smoothingWindow} onSmoothingWindowChange={setSmoothingWindow}
+                fitModel={fitModel} onFitModelChange={m => { setFitModel(m); setFitResults(null); }}
+                fitResults={fitResults} onFit={handleFit} onClearFit={() => setFitResults(null)}
+                cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y}
+                snapToData={snapToData} fitBetweenCursors={fitBetweenCursors}
+                onSnapToDataChange={setSnapToData}
+                onFitBetweenCursorsChange={setFitBetweenCursors}
+                onClearCursor1={() => { setCursor1(null); setCursor1Y(null); }}
+                onClearCursor2={() => { setCursor2(null); setCursor2Y(null); }}
+                onClearAllCursors={() => { setCursor1(null); setCursor1Y(null); setCursor2(null); setCursor2Y(null); }}
+                traceStyles={traceStyles} onTraceStyleChange={handleTraceStyleChange}
+              />
+            </aside>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -30,3 +30,12 @@ export type XYPanel = {
 };
 
 export type Panel = DatasetPanel | XYPanel;
+
+export type { FitResult } from './fitting';
+
+export type TraceStyle = {
+  color: string;        // '' = use PLOTLY_COLORS[i]
+  lineWidth: number;
+  lineDash: 'solid' | 'dash' | 'dot' | 'dashdot' | 'none';
+  markerSymbol: 'circle' | 'square' | 'diamond' | 'triangle-up' | 'cross' | 'x' | 'none';
+};

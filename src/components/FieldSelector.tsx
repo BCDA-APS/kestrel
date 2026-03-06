@@ -175,22 +175,19 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
       const table = await resp.json();
       const seqNums: number[] = table.seq_num ?? [];
       const nRows = seqNums.length > 0 ? (seqNums.findIndex(s => s === 0) === -1 ? seqNums.length : seqNums.findIndex(s => s === 0)) : undefined;
-      return yFields.map(yf => ({
-        x: nRows !== undefined ? (table[xField] ?? []).slice(0, nRows) : (table[xField] ?? []),
-        y: nRows !== undefined ? (table[yf] ?? []).slice(0, nRows) : (table[yf] ?? []),
-        xLabel: xField, yLabel: yf, runLabel, runId,
-      }));
+      return yFields.map(yf => {
+        const yArr = nRows !== undefined ? (table[yf] ?? []).slice(0, nRows) : (table[yf] ?? []);
+        const xArr = nRows !== undefined ? (table[xField] ?? []).slice(0, nRows) : (table[xField] ?? []);
+        return { x: xArr, y: yArr, xLabel: xField, yLabel: yf, runLabel, runId };
+      });
     }
     const base = `${serverUrl}/api/v1/array/full/${catalog}/${runId}/${selectedStream}${subPath}`;
-    const [xResp, ...yResps] = await Promise.all([
-      fetch(`${base}/${xField}?format=application/json`),
-      ...yFields.map(yf => fetch(`${base}/${yf}?format=application/json`)),
-    ]);
-    if (!xResp.ok || yResps.some(r => !r.ok)) throw new Error('Fetch failed');
-    const [xData, ...yDatas]: [number[], ...number[][]] = await Promise.all([
-      xResp.json(),
-      ...yResps.map(r => r.json()),
-    ]);
+    const yResps = await Promise.all(yFields.map(yf => fetch(`${base}/${yf}?format=application/json`)));
+    if (yResps.some(r => !r.ok)) throw new Error('Fetch failed');
+    const yDatas: number[][] = await Promise.all(yResps.map(r => r.json()));
+    const xResp = await fetch(`${base}/${xField}?format=application/json`);
+    if (!xResp.ok) throw new Error('Fetch failed');
+    const xData: number[] = await xResp.json();
     return yFields.map((yf, i) => ({ x: xData, y: yDatas[i], xLabel: xField, yLabel: yf, runLabel, runId }));
   };
 
