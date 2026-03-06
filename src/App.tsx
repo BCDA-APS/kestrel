@@ -3,6 +3,9 @@ import RunTable from './components/RunTable';
 import FieldSelector, { type FieldSelectorHandle } from './components/FieldSelector';
 import VisualizationPanel from './components/VisualizationPanel';
 import AnalysisPanel from './components/AnalysisPanel';
+import RunDataTab from './components/RunDataTab';
+import RunMetadataTab from './components/RunMetadataTab';
+import RunSummaryTab from './components/RunSummaryTab';
 import type { Panel, XYTrace, TraceStyle } from './types';
 import { fitData, MODEL_NAMES } from './fitting';
 import type { FitResult } from './fitting';
@@ -59,6 +62,7 @@ export default function App() {
   const [fitResults, setFitResults] = useState<FitResult | null>(null);
   const [showDerivative, setShowDerivative] = useState(false);
   const [smoothingWindow, setSmoothingWindow] = useState(1);
+  const [centerTab, setCenterTab] = useState<'graph' | 'data' | 'metadata' | 'summary'>('graph');
   const [traceStyles, setTraceStyles] = useState<TraceStyle[]>([]);
   const [cursor1, setCursor1] = useState<number | null>(null);
   const [cursor1Y, setCursor1Y] = useState<number | null>(null);
@@ -446,20 +450,58 @@ export default function App() {
 
         {analysisPosition === 'right' ? (
           <>
-            {/* Main content */}
-            <main className="flex-1 overflow-hidden p-4">
-              {panel ? (
-                <VisualizationPanel panel={panel} onRemove={() => { setPanel(null); setFitResults(null); }} onRemoveTrace={removeTrace} onStopLive={stopLive} onLiveTracesUpdate={handleLiveTracesUpdate} extraTraces={derivativeTraces} onRemoveExtraTrace={() => setShowDerivative(false)} xLog={xLog} yLog={yLog} fitResults={fitResults} traceStyles={traceStyles} cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y} onPlotClick={handlePlotClick} />
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center text-gray-400 select-none">
-                  <svg className="h-16 w-16 mb-4 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1}
-                      d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
-                  </svg>
-                  <p className="text-base font-medium">No plot open</p>
-                  <p className="text-sm mt-1">Select X and Y fields on the left and click Plot</p>
-                </div>
-              )}
+            {/* Main content with tabs */}
+            <main className="flex-1 overflow-hidden flex flex-col">
+              {/* Tab bar */}
+              <div className="flex-none flex gap-0.5 px-4 pt-2 bg-gray-50 border-b border-gray-200">
+                {(['graph', 'data', 'metadata', 'summary'] as const).map(tab => (
+                  <button
+                    key={tab}
+                    onClick={() => setCenterTab(tab)}
+                    className={`px-4 py-1.5 text-sm font-medium rounded-t -mb-px border-b-2 transition-colors ${
+                      centerTab === tab
+                        ? 'text-sky-700 border-sky-600 bg-white'
+                        : 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tab content */}
+              <div className="flex-1 overflow-hidden p-4">
+                {centerTab === 'graph' && (
+                  panel ? (
+                    <VisualizationPanel panel={panel} onRemove={() => { setPanel(null); setFitResults(null); }} onRemoveTrace={removeTrace} onStopLive={stopLive} onLiveTracesUpdate={handleLiveTracesUpdate} extraTraces={derivativeTraces} onRemoveExtraTrace={() => setShowDerivative(false)} xLog={xLog} yLog={yLog} fitResults={fitResults} traceStyles={traceStyles} cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y} onPlotClick={handlePlotClick} />
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-gray-400 select-none">
+                      <svg className="h-16 w-16 mb-4 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1}
+                          d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+                      </svg>
+                      <p className="text-base font-medium">No plot open</p>
+                      <p className="text-sm mt-1">Double-click a run to plot it, or select a run,</p>
+                      <p className="text-sm">choose X and Y fields on the left, and click Plot</p>
+                    </div>
+                  )
+                )}
+                {centerTab === 'data' && (
+                  <div className="bg-white rounded-lg border border-gray-200 h-full overflow-hidden">
+                    <RunDataTab serverUrl={serverUrl} catalog={selectedCatalog} runId={selectedRunId} />
+                  </div>
+                )}
+                {centerTab === 'metadata' && (
+                  <div className="bg-white rounded-lg border border-gray-200 h-full overflow-hidden">
+                    <RunMetadataTab serverUrl={serverUrl} catalog={selectedCatalog} runId={selectedRunId} />
+                  </div>
+                )}
+                {centerTab === 'summary' && (
+                  <div className="bg-gray-50 rounded-lg border border-gray-200 h-full overflow-hidden">
+                    <RunSummaryTab serverUrl={serverUrl} catalog={selectedCatalog} runId={selectedRunId} />
+                  </div>
+                )}
+              </div>
             </main>
 
             {/* Right analysis divider + collapse toggle */}
@@ -509,20 +551,58 @@ export default function App() {
         ) : (
           /* Bottom position */
           <div className="flex-1 flex flex-col overflow-hidden">
-            {/* Main content */}
-            <main className="flex-1 overflow-hidden p-4">
-              {panel ? (
-                <VisualizationPanel panel={panel} onRemove={() => { setPanel(null); setFitResults(null); }} onRemoveTrace={removeTrace} onStopLive={stopLive} onLiveTracesUpdate={handleLiveTracesUpdate} extraTraces={derivativeTraces} onRemoveExtraTrace={() => setShowDerivative(false)} xLog={xLog} yLog={yLog} fitResults={fitResults} traceStyles={traceStyles} cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y} onPlotClick={handlePlotClick} />
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center text-gray-400 select-none">
-                  <svg className="h-16 w-16 mb-4 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1}
-                      d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
-                  </svg>
-                  <p className="text-base font-medium">No plot open</p>
-                  <p className="text-sm mt-1">Select X and Y fields on the left and click Plot</p>
-                </div>
-              )}
+            {/* Main content with tabs */}
+            <main className="flex-1 overflow-hidden flex flex-col">
+              {/* Tab bar */}
+              <div className="flex-none flex gap-0.5 px-4 pt-2 bg-gray-50 border-b border-gray-200">
+                {(['graph', 'data', 'metadata', 'summary'] as const).map(tab => (
+                  <button
+                    key={tab}
+                    onClick={() => setCenterTab(tab)}
+                    className={`px-4 py-1.5 text-sm font-medium rounded-t -mb-px border-b-2 transition-colors ${
+                      centerTab === tab
+                        ? 'text-sky-700 border-sky-600 bg-white'
+                        : 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tab content */}
+              <div className="flex-1 overflow-hidden p-4">
+                {centerTab === 'graph' && (
+                  panel ? (
+                    <VisualizationPanel panel={panel} onRemove={() => { setPanel(null); setFitResults(null); }} onRemoveTrace={removeTrace} onStopLive={stopLive} onLiveTracesUpdate={handleLiveTracesUpdate} extraTraces={derivativeTraces} onRemoveExtraTrace={() => setShowDerivative(false)} xLog={xLog} yLog={yLog} fitResults={fitResults} traceStyles={traceStyles} cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y} onPlotClick={handlePlotClick} />
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-gray-400 select-none">
+                      <svg className="h-16 w-16 mb-4 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1}
+                          d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+                      </svg>
+                      <p className="text-base font-medium">No plot open</p>
+                      <p className="text-sm mt-1">Double-click a run to plot it, or select a run,</p>
+                      <p className="text-sm">choose X and Y fields on the left, and click Plot</p>
+                    </div>
+                  )
+                )}
+                {centerTab === 'data' && (
+                  <div className="bg-white rounded-lg border border-gray-200 h-full overflow-hidden">
+                    <RunDataTab serverUrl={serverUrl} catalog={selectedCatalog} runId={selectedRunId} />
+                  </div>
+                )}
+                {centerTab === 'metadata' && (
+                  <div className="bg-white rounded-lg border border-gray-200 h-full overflow-hidden">
+                    <RunMetadataTab serverUrl={serverUrl} catalog={selectedCatalog} runId={selectedRunId} />
+                  </div>
+                )}
+                {centerTab === 'summary' && (
+                  <div className="bg-gray-50 rounded-lg border border-gray-200 h-full overflow-hidden">
+                    <RunSummaryTab serverUrl={serverUrl} catalog={selectedCatalog} runId={selectedRunId} />
+                  </div>
+                )}
+              </div>
             </main>
 
             {/* Bottom analysis divider + collapse toggle */}

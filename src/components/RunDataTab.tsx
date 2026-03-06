@@ -1,0 +1,178 @@
+import { useState, useEffect } from 'react';
+
+type Props = {
+  serverUrl: string;
+  catalog: string;
+  runId: string;
+};
+
+// Probe a stream to find the correct table URL, mirroring FieldSelector logic.
+// Returns the full table URL or null if no tabular data found.
+async function resolveTableUrl(serverUrl: string, catalog: string, runId: string, stream: string): Promise<string | null> {
+  const searchUrl = `${serverUrl}/api/v1/search/${catalog}/${runId}/${stream}?page[limit]=200`;
+  const r = await fetch(searchUrl);
+  if (!r.ok) return null;
+  const json = await r.json();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const items: any[] = json.data ?? [];
+
+  // Case 1: table node directly under stream (PostgreSQL adapter)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tableItem = items.find((item: any) => item.attributes?.structure_family === 'table');
+  if (tableItem) {
+    return `${serverUrl}/api/v1/table/full/${catalog}/${runId}/${stream}/${tableItem.id}?format=application/json`;
+  }
+
+  // Case 2: arrays directly under stream — try fetching stream as a table
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const hasArrays = items.some((item: any) => item.attributes?.structure_family === 'array');
+  if (hasArrays) {
+    return `${serverUrl}/api/v1/table/full/${catalog}/${runId}/${stream}?format=application/json`;
+  }
+
+  // Case 3: sub-nodes (MongoDB adapter: primary/data or primary/internal)
+  for (const sub of ['data', 'internal']) {
+    const subR = await fetch(`${serverUrl}/api/v1/search/${catalog}/${runId}/${stream}/${sub}?page[limit]=10`);
+    if (subR.ok) {
+      const subJson = await subR.json();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if ((subJson.data ?? []).some((item: any) => item.attributes?.structure_family === 'array')) {
+        return `${serverUrl}/api/v1/table/full/${catalog}/${runId}/${stream}/${sub}?format=application/json`;
+      }
+    }
+  }
+
+  return null;
+}
+
+export default function RunDataTab({ serverUrl, catalog, runId }: Props) {
+  const [streams, setStreams] = useState<string[]>([]);
+  const [activeStream, setActiveStream] = useState('');
+  const [data, setData] = useState<Record<string, unknown[]>>({});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  // Fetch available streams for the run
+  useEffect(() => {
+    if (!serverUrl || !catalog || !runId) { setStreams([]); setActiveStream(''); return; }
+    fetch(`${serverUrl}/api/v1/search/${catalog}/${runId}?page[limit]=50`)
+      .then(r => r.json())
+      .then(j => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const names: string[] = (j.data ?? []).map((d: any) => d.id);
+        setStreams(names);
+        setActiveStream(names.includes('primary') ? 'primary' : names[0] ?? '');
+      })
+      .catch(() => setStreams([]));
+  }, [serverUrl, catalog, runId]);
+
+  // Resolve the correct table URL then fetch data
+  useEffect(() => {
+    if (!activeStream) { setData({}); return; }
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    setData({});
+
+    (async () => {
+      try {
+        const url = await resolveTableUrl(serverUrl, catalog, runId, activeStream);
+        if (cancelled) return;
+        if (!url) { setError('No tabular data found in this stream'); return; }
+        const r = await fetch(url);
+        if (cancelled) return;
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = await r.json();
+        if (!cancelled) setData(d);
+      } catch (e) {
+        if (!cancelled) setError(String(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [serverUrl, catalog, runId, activeStream]);
+
+  if (!runId) {
+    return (
+      <div className="h-full flex items-center justify-center text-gray-400 text-sm">
+        Select a run to view data
+      </div>
+    );
+  }
+
+  const columns = Object.keys(data);
+  const nRows = columns.length > 0 ? (data[columns[0]] as unknown[]).length : 0;
+  const thCls = 'sticky top-0 z-10 px-3 py-1.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide bg-gray-50 border-b border-gray-200 whitespace-nowrap';
+  const tdCls = 'px-3 py-1 text-xs text-gray-700 border-b border-gray-100 whitespace-nowrap font-mono';
+
+  return (
+    <div className="h-full flex flex-col overflow-hidden">
+      {/* Stream selector */}
+      {streams.length > 1 && (
+        <div className="flex-none flex gap-1 px-1 py-1.5 border-b border-gray-200 bg-gray-50">
+          {streams.map(s => (
+            <button
+              key={s}
+              onClick={() => setActiveStream(s)}
+              className={`px-2.5 py-0.5 text-xs rounded font-medium transition-colors ${
+                s === activeStream
+                  ? 'bg-sky-600 text-white'
+                  : 'text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Content */}
+      <div className="flex-1 overflow-auto">
+        {loading && (
+          <div className="flex items-center justify-center h-full text-gray-400 text-sm">Loading…</div>
+        )}
+        {error && !loading && (
+          <div className="flex items-center justify-center h-full text-red-400 text-sm">{error}</div>
+        )}
+        {!loading && !error && columns.length === 0 && (
+          <div className="flex items-center justify-center h-full text-gray-400 text-sm">
+            {activeStream ? 'No tabular data in this stream' : 'No streams available'}
+          </div>
+        )}
+        {!loading && !error && columns.length > 0 && (
+          <>
+            <div className="px-3 py-1.5 text-xs text-gray-400 bg-white border-b border-gray-100 sticky top-0 z-20">
+              {nRows} rows · {columns.length} columns
+            </div>
+            <table className="w-full border-collapse">
+              <thead>
+                <tr>
+                  <th className={thCls}>#</th>
+                  {columns.map(col => (
+                    <th key={col} className={thCls}>{col}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: nRows }, (_, i) => (
+                  <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                    <td className={`${tdCls} text-gray-400`}>{i + 1}</td>
+                    {columns.map(col => {
+                      const v = (data[col] as unknown[])[i];
+                      const display = typeof v === 'number'
+                        ? (Number.isInteger(v) ? String(v) : v.toPrecision(6))
+                        : String(v ?? '');
+                      return <td key={col} className={tdCls}>{display}</td>;
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
