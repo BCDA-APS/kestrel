@@ -110,17 +110,14 @@ function qserverProxyPlugin(): Plugin {
           const proxyReq = transport.request(
             { hostname, port, path, method: req.method, headers: { ...proxyReqHeaders, 'content-length': body.length } },
             (proxyRes) => {
-              const respChunks: Buffer[] = [];
-              proxyRes.on('data', (chunk: Buffer) => respChunks.push(chunk));
-              proxyRes.on('end', () => {
-                const respBody = Buffer.concat(respChunks);
-                const headers = { ...proxyRes.headers };
-                headers['content-length'] = String(respBody.length);
-                headers['access-control-allow-origin'] = '*';
-                delete headers['content-encoding'];
-                res.writeHead(proxyRes.statusCode ?? 200, headers);
-                res.end(respBody);
-              });
+              // Always pipe directly — qserver proxy does no URL rewriting,
+              // and piping handles both regular JSON and streaming responses.
+              const headers = { ...proxyRes.headers };
+              headers['access-control-allow-origin'] = '*';
+              delete headers['content-encoding'];
+              res.writeHead(proxyRes.statusCode ?? 200, headers);
+              proxyRes.pipe(res);
+              req.on('close', () => proxyReq.destroy());
             }
           );
           proxyReq.on('error', (err) => { res.writeHead(502); res.end(`Proxy error: ${err.message}`); });

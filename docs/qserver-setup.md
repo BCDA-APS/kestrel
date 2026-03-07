@@ -23,7 +23,41 @@ pip install "bluesky-httpserver==0.0.13" "bluesky-queueserver-api==0.0.12"
 
 ---
 
-## 2. Create a startup script
+## 2. Create a permissions config file
+
+By default, anonymous users only get `read:status` scope — not enough to access queue, history, plans, or console output. Setting `QSERVER_HTTP_SERVER_CONFIG` activates full scope checking, so you must explicitly grant all needed scopes using `scopes_set` (which replaces the defaults entirely, unlike `scopes_add` which only appends to `{read:status}`).
+
+Copy `docs/qs_permissions.yml` from this repo to your instrument directory (e.g. `scripts/qs_permissions.yml`). It grants anonymous users the full set of scopes needed for Webviz:
+
+```yaml
+api_access:
+  policy: bluesky_httpserver.authorization:BasicAPIAccessControl
+  args:
+    roles:
+      unauthenticated_public:
+        scopes_set:
+          - read:status
+          - read:queue
+          - read:history
+          - read:resources
+          - read:config
+          - read:monitor
+          - read:console
+          - read:lock
+          - read:testing
+          - write:queue:edit
+          - write:queue:control
+          - write:manager:control
+          - write:plan:control
+          - write:execute
+          - write:history:edit
+```
+
+> **Important:** Use `scopes_set`, not `scopes_add`. Using `scopes_add` with only `read:console` will leave queue, history, and plans returning 401.
+
+---
+
+## 3. Create a startup script
 
 Create a script (e.g. `scripts/qs_http.sh`) in your instrument directory:
 
@@ -35,6 +69,9 @@ export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib"
 
 # Allow connections without an API key
 export QSERVER_HTTP_SERVER_ALLOW_ANONYMOUS_ACCESS=1
+
+# Grant anonymous users full Webviz scopes (queue, history, console, etc.)
+export QSERVER_HTTP_SERVER_CONFIG=/path/to/scripts/qs_permissions.yml
 
 # ZMQ addresses of the running queueserver
 export QSERVER_ZMQ_CONTROL_ADDRESS="tcp://localhost:60615"
@@ -54,6 +91,7 @@ chmod +x scripts/qs_http.sh
 | Variable | Value | Purpose |
 |---|---|---|
 | `QSERVER_HTTP_SERVER_ALLOW_ANONYMOUS_ACCESS` | `1` | Disable API key requirement |
+| `QSERVER_HTTP_SERVER_CONFIG` | path to YAML file | Grants full Webviz scopes to anonymous users |
 | `QSERVER_ZMQ_CONTROL_ADDRESS` | `tcp://localhost:60615` | ZMQ control socket of queueserver |
 | `QSERVER_ZMQ_INFO_ADDRESS` | `tcp://localhost:60625` | ZMQ info socket of queueserver |
 
@@ -61,7 +99,7 @@ chmod +x scripts/qs_http.sh
 
 ---
 
-## 3. Start the HTTP server
+## 4. Start the HTTP server
 
 On the machine running the queueserver:
 
@@ -86,7 +124,7 @@ The server listens on port **60610**.
 
 ---
 
-## 4. Connect from Webviz
+## 5. Connect from Webviz
 
 1. Open the **Queue Server** tab in Webviz
 2. Set the HTTP URL to `http://<hostname>:60610` (e.g. `http://nefarian.xray.aps.anl.gov:60610`)

@@ -1,0 +1,21 @@
+api_access:
+  policy: bluesky_httpserver.authorization:BasicAPIAccessControl
+  args:
+    roles:
+      unauthenticated_public:
+        scopes_set:
+          - read:status
+          - read:queue
+          - read:history
+          - read:resources
+          - read:config
+          - read:monitor
+          - read:console
+          - read:lock
+          - read:testing
+          - write:queue:edit
+          - write:queue:control
+          - write:manager:control
+          - write:plan:control
+          - write:execute
+          - write:history:edit

@@ -142,8 +142,40 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
   // Console
   const [consoleLines, setConsoleLines] = useState<string[]>([]);
   const [consoleOn, setConsoleOn] = useState(true);
-  const wsRef = useRef<WebSocket | null>(null);
+  const [wsStatus, setWsStatus] = useState<'connecting' | 'open' | 'closed' | 'error'>('connecting');
   const consoleEndRef = useRef<HTMLDivElement>(null);
+
+  // Resize state
+  const [sidebarWidth, setSidebarWidth] = useState(256);
+  const [queueHeight, setQueueHeight] = useState(160);
+  const [addItemHeight, setAddItemHeight] = useState(220);
+
+  const dragSidebar = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX, startW = sidebarWidth;
+    const onMove = (ev: MouseEvent) => setSidebarWidth(Math.max(150, Math.min(window.innerWidth - 200, startW + ev.clientX - startX)));
+    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
+  const dragQueue = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY, startH = queueHeight;
+    const onMove = (ev: MouseEvent) => setQueueHeight(Math.max(60, Math.min(window.innerHeight - 200, startH + ev.clientY - startY)));
+    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
+  const dragAddItem = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY, startH = addItemHeight;
+    const onMove = (ev: MouseEvent) => setAddItemHeight(Math.max(80, Math.min(window.innerHeight - 150, startH + ev.clientY - startY)));
+    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
 
   // ── API helpers ──────────────────────────────────────────────────────────
   const api = useCallback(async (path: string, body?: object) => {
@@ -210,27 +242,41 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
   // ── Report status to parent ───────────────────────────────────────────────
   useEffect(() => { onStatusChange?.(status); }, [status, onStatusChange]);
 
-  // ── WebSocket console (direct connection — no proxy for WS) ──────────────
+  // ── Console polling (/api/console_output every second) ───────────────────
   useEffect(() => {
-    if (!consoleOn) { wsRef.current?.close(); return; }
-    // The vite proxy doesn't handle WS upgrades, connect directly to the server
-    const wsUrl = serverUrl.replace(/^https/, 'wss').replace(/^http/, 'ws') + '/api/console_output/ws';
-    let ws: WebSocket | null = null;
-    try { ws = new WebSocket(wsUrl); } catch { return; }
-    const _ws = ws;
-    wsRef.current = _ws;
-    _ws.onmessage = (ev) => {
+    if (!consoleOn) { setWsStatus('closed'); return; }
+    setWsStatus('connecting');
+    let running = true;
+
+    const poll = async () => {
+      if (!running) return;
       try {
-        const data = JSON.parse(ev.data);
-        const line: string = data.text ?? data.msg ?? JSON.stringify(data);
-        setConsoleLines(prev => [...prev.slice(-499), line]);
-      } catch {
-        setConsoleLines(prev => [...prev.slice(-499), ev.data]);
+        const r = await fetch(`${proxyUrl}/api/console_output`);
+        if (!r.ok) {
+          if (r.status === 401) {
+            setWsStatus('closed');
+            setConsoleLines(['Console unavailable: server requires read:console scope.',
+              'See docs/qserver-setup.md for the permissions config.']);
+            return;
+          }
+          throw new Error(`HTTP ${r.status}`);
+        }
+        const data = await r.json();
+        if (!running) return;
+        const text: string = data.text ?? '';
+        const lines = text.split('\n').filter((l: string) => l.trim());
+        setConsoleLines(lines.slice(-500));
+        setWsStatus('open');
+      } catch (err) {
+        if (!running) return;
+        setWsStatus('error');
       }
+      if (running) setTimeout(poll, 1000);
     };
-    _ws.onerror = () => {};
-    return () => { _ws.close(); };
-  }, [serverUrl, consoleOn]);
+
+    poll();
+    return () => { running = false; };
+  }, [proxyUrl, consoleOn]);
 
   useEffect(() => {
     consoleEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -309,7 +355,7 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
       {/* Body */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left sidebar: Queue + RE + History */}
-        <div className="flex-none w-64 bg-gray-50 border-r border-gray-200 flex flex-col overflow-hidden">
+        <div className="flex-none bg-gray-50 border-r border-gray-200 flex flex-col overflow-hidden" style={{ width: sidebarWidth }}>
 
           {/* Queue */}
           <div className="flex-none px-3 py-2 bg-white border-b border-gray-200 flex items-center gap-2">
@@ -328,7 +374,7 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
             >Stop</button>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-2 space-y-1.5 min-h-0" style={{ maxHeight: '40%' }}>
+          <div className="overflow-y-auto p-2 space-y-1.5 min-h-0" style={{ height: queueHeight }}>
             {runningItem && (
               <QueueCard item={runningItem} running key={runningItem.item_uid} onDelete={() => {}} />
             )}
@@ -344,6 +390,12 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
               <p className="text-xs text-gray-400 text-center py-4">Queue is empty</p>
             )}
           </div>
+
+          {/* Queue/History drag handle */}
+          <div
+            className="flex-none h-1 cursor-row-resize bg-gray-200 hover:bg-sky-400 transition-colors"
+            onMouseDown={dragQueue}
+          />
 
           {/* RE status indicator */}
           <div className="flex-none border-t border-b border-gray-200 bg-white px-3 py-2 flex items-center gap-2">
@@ -375,10 +427,16 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
           </div>
         </div>
 
+        {/* Vertical drag handle */}
+        <div
+          className="flex-none w-1 cursor-col-resize bg-gray-200 hover:bg-sky-400 transition-colors"
+          onMouseDown={dragSidebar}
+        />
+
         {/* Right main area */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Add Item */}
-          <div className="flex-none bg-white border-b border-gray-200 p-4">
+          <div className="overflow-y-auto bg-white border-b border-gray-200 p-4" style={{ height: addItemHeight }}>
             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Add Item</h3>
 
             {allowedPlans.length === 0 ? (
@@ -453,10 +511,22 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
             )}
           </div>
 
+          {/* Add Item / Console drag handle */}
+          <div
+            className="flex-none h-1 cursor-row-resize bg-gray-300 hover:bg-sky-400 transition-colors"
+            onMouseDown={dragAddItem}
+          />
+
           {/* Console */}
           <div className="flex-1 flex flex-col overflow-hidden bg-gray-900">
             <div className="flex-none flex items-center gap-3 px-3 py-1.5 bg-gray-800 border-b border-gray-700">
               <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide flex-1">Console Output</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                wsStatus === 'open' ? 'bg-green-800 text-green-300' :
+                wsStatus === 'connecting' ? 'bg-amber-800 text-amber-300' :
+                wsStatus === 'error' ? 'bg-red-800 text-red-300' :
+                'bg-gray-700 text-gray-400'
+              }`}>{wsStatus}</span>
               <button
                 onClick={() => setConsoleLines([])}
                 className="text-xs text-gray-500 hover:text-gray-300"
