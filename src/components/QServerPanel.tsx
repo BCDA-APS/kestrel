@@ -8,7 +8,7 @@ type QueueItem = {
   kwargs: Record<string, unknown>;
   item_uid: string;
   status?: string;
-  result?: { exit_status?: string; msg?: string; time_start?: number; time_stop?: number };
+  result?: { exit_status?: string; msg?: string; time_start?: number; time_stop?: number; run_uids?: string[]; scan_ids?: number[] };
 };
 
 type PlanParam = {
@@ -22,6 +22,17 @@ type AllowedPlan = {
   name: string;
   description?: string;
   parameters?: PlanParam[];
+};
+
+type RERunInfo = {
+  uid: string;
+  scan_id?: number;
+  is_open: boolean;
+  exit_status?: string;
+};
+
+type RERunsData = {
+  run_list: RERunInfo[];
 };
 
 type ServerStatus = {
@@ -163,6 +174,11 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
   const [submitMsg, setSubmitMsg] = useState('');
   const [submitError, setSubmitError] = useState('');
 
+  // RE pause/resume pending
+  const [pausePending, setPausePending] = useState(false);
+  const [resumePending, setResumePending] = useState(false);
+  const [abortPending, setAbortPending] = useState(false);
+
   // Console
   const [consoleLines, setConsoleLines] = useState<string[]>([]);
   const [consoleOn, setConsoleOn] = useState(true);
@@ -170,10 +186,13 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
   const consoleTextOffsetRef = useRef<number>(0);
   const consoleEndRef = useRef<HTMLDivElement>(null);
 
+  const [reRuns, setReRuns] = useState<RERunsData | null>(null);
+
   // Resize state
   const [sidebarWidth, setSidebarWidth] = useState(500);
   const [queueHeight, setQueueHeight] = useState(600);
-  const [addItemHeight, setAddItemHeight] = useState(700);
+  const [topSectionHeight, setTopSectionHeight] = useState(600);
+  const [runningPlanWidth, setRunningPlanWidth] = useState(400);
 
   const dragSidebar = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -193,10 +212,19 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
     document.addEventListener('mouseup', onUp);
   };
 
-  const dragAddItem = (e: React.MouseEvent) => {
+  const dragRunningPlan = (e: React.MouseEvent) => {
     e.preventDefault();
-    const startY = e.clientY, startH = addItemHeight;
-    const onMove = (ev: MouseEvent) => setAddItemHeight(Math.max(80, Math.min(window.innerHeight - 150, startH + ev.clientY - startY)));
+    const startX = e.clientX, startW = runningPlanWidth;
+    const onMove = (ev: MouseEvent) => setRunningPlanWidth(Math.max(150, Math.min(window.innerWidth - 300, startW + ev.clientX - startX)));
+    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
+  const dragTopSection = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY, startH = topSectionHeight;
+    const onMove = (ev: MouseEvent) => setTopSectionHeight(Math.max(100, Math.min(window.innerHeight - 150, startH + ev.clientY - startY)));
     const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
@@ -218,10 +246,11 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
   // ── Polling ──────────────────────────────────────────────────────────────
   const refresh = useCallback(async () => {
     try {
-      const [st, q, h] = await Promise.all([
+      const [st, q, h, runs] = await Promise.all([
         api('/api/status').catch(() => null),
         api('/api/queue/get').catch(() => null),
         api('/api/history/get').catch(() => null),
+        api('/api/re/runs', {}).catch(() => null),
       ]);
       if (st) setStatus(st);
       if (q) {
@@ -229,6 +258,7 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
         setRunningItem(q.running_item?.item_uid ? q.running_item : null);
       }
       if (h) setHistory([...(h.items ?? [])].reverse());
+setReRuns(runs ?? null);
     } catch { /* ignore */ }
   }, [api]);
 
@@ -268,6 +298,13 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
 
   // ── Report status to parent ───────────────────────────────────────────────
   useEffect(() => { onStatusChange?.(status); }, [status, onStatusChange]);
+
+  // ── Clear pending states when RE state changes ────────────────────────────
+  useEffect(() => {
+    if (status?.re_state !== 'running') setPausePending(false);
+    if (status?.re_state !== 'paused') setResumePending(false);
+    if (status?.re_state === 'idle') setAbortPending(false);
+  }, [status?.re_state]);
 
   // ── Console polling (full buffer diff via /api/console_output) ──────────────
   useEffect(() => {
@@ -362,6 +399,18 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
     try { await api('/api/environment/close', {}); refresh(); } catch (e) { console.error(e); }
   };
 
+  const handlePauseRE = async () => {
+    try { setPausePending(true); await api('/api/re/pause', { option: 'deferred' }); refresh(); } catch (e) { console.error(e); setPausePending(false); }
+  };
+
+  const handleResumeRE = async () => {
+    try { setResumePending(true); await api('/api/re/resume', {}); refresh(); } catch (e) { console.error(e); setResumePending(false); }
+  };
+
+  const handleAbortRE = async () => {
+    try { setAbortPending(true); await api('/api/re/abort', {}); refresh(); } catch (e) { console.error(e); setAbortPending(false); }
+  };
+
   const handleToggleAutostart = async () => {
     try {
       await api('/api/queue/autostart', { enable: !status?.queue_autostart_enabled });
@@ -420,7 +469,7 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
   };
 
   // ── Derived state ────────────────────────────────────────────────────────
-  const isRERunning = status?.re_state === 'running';
+  const isRERunning = status?.re_state === 'running' || status?.re_state === 'paused' || abortPending;
   const isREIdle = status?.re_state === 'idle' || !status?.worker_environment_exists;
   const reState = status?.re_state ?? '—';
   const activePlan = allowedPlans.find(p => p.name === selectedPlan);
@@ -500,20 +549,44 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
           <div className="flex-none border-t border-b border-gray-200 bg-white pl-3 pr-4 py-4 flex items-center gap-2">
             <span className={`w-3 h-3 rounded-full shrink-0 ${
               !status?.worker_environment_exists ? 'bg-red-500' :
-              isRERunning ? 'bg-sky-500 animate-pulse' : 'bg-green-500'
+              abortPending ? 'bg-amber-400 animate-pulse' :
+              resumePending ? 'bg-sky-500 animate-pulse' :
+              status?.re_state === 'paused' ? 'bg-amber-400 animate-pulse' :
+              status?.re_state === 'running' ? 'bg-sky-500 animate-pulse' :
+              'bg-green-500'
             }`} />
             <span className="text-sm text-gray-600 font-medium flex-1">
               {!status?.worker_environment_exists ? 'RE Env not open' : `RE: ${reState}`}
             </span>
-            {status && (
+            {status?.re_state === 'running' && (
               <button
-                onClick={status.worker_environment_exists ? handleCloseEnv : handleOpenEnv}
+                onClick={handlePauseRE}
                 className={`text-xs px-2 py-0.5 rounded font-medium transition-colors ${
-                  status.worker_environment_exists
-                    ? 'bg-red-100 text-red-600 hover:bg-red-200'
-                    : 'bg-green-100 text-green-700 hover:bg-green-200'
+                  pausePending
+                    ? 'bg-amber-400 text-white animate-pulse ring-2 ring-amber-300 ring-offset-1'
+                    : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
                 }`}
-              >{status.worker_environment_exists ? 'Close Env' : 'Open Env'}</button>
+                title={pausePending ? 'Pause requested — waiting for checkpoint…' : 'Pause at next checkpoint'}
+              >{pausePending ? 'Pausing…' : 'Pause'}</button>
+            )}
+            {status?.re_state === 'paused' && !abortPending && (
+              <button
+                onClick={handleResumeRE}
+                className={`text-xs px-2 py-0.5 rounded font-medium transition-colors ${
+                  resumePending
+                    ? 'bg-sky-500 text-white animate-pulse ring-2 ring-sky-300 ring-offset-1'
+                    : 'bg-sky-100 text-sky-700 hover:bg-sky-200'
+                }`}
+                title={resumePending ? 'Resume requested…' : 'Resume paused plan'}
+              >{resumePending ? 'Resuming…' : 'Resume'}</button>
+            )}
+            {(status?.re_state === 'paused' || abortPending) && (
+              <button
+                onClick={handleAbortRE}
+                disabled={abortPending}
+                className={`text-xs px-2 py-0.5 rounded font-medium transition-colors ${abortPending ? 'bg-red-500 text-white animate-pulse ring-2 ring-red-300 ring-offset-1' : 'bg-red-100 text-red-600 hover:bg-red-200'}`}
+                title={abortPending ? 'Aborting…' : 'Abort paused plan'}
+              >{abortPending ? 'Aborting…' : 'Abort'}</button>
             )}
           </div>
 
@@ -541,12 +614,73 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
 
         {/* Right main area */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Add Item header — height matches Queue header (py-4 + button height) */}
-          <div className="flex-none px-4 py-[14px] bg-white border-b border-gray-200">
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Add Item</span>
-          </div>
-          {/* Add Item body */}
-          <div className="overflow-y-auto bg-white border-b border-gray-200 p-4" style={{ height: addItemHeight }}>
+          {/* Top section: Running Plan + Add Item side by side */}
+          <div className="flex-none flex flex-row overflow-hidden" style={{ height: topSectionHeight }}>
+
+            {/* Running Plan */}
+            <div className="flex-none flex flex-col overflow-hidden border-r border-gray-200" style={{ width: runningPlanWidth }}>
+              <div className="flex-none px-4 py-[14px] bg-white border-b border-gray-200">
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Running Plan</span>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 bg-white text-sm">
+                {runningItem ? (
+                  <div className="space-y-2">
+                    <div><span className="font-semibold">Plan Name: </span><span className="text-teal-600">{runningItem.name}</span></div>
+                    <div>
+                      <div className="font-semibold">Parameters:</div>
+                      <div className="pl-4 space-y-0.5 mt-0.5">
+                        {Object.entries(runningItem.kwargs ?? {}).map(([k, v]) => (
+                          <div key={k}><span className="font-semibold">{k}: </span><span className="text-gray-600">{JSON.stringify(v)}</span></div>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="font-semibold">Runs:</div>
+                      {(!reRuns?.run_list || reRuns.run_list.length === 0) ? (
+                        <p className="pl-4 mt-0.5 text-xs text-gray-400 italic">Waiting for runs…</p>
+                      ) : (
+                        <div className="pl-4 space-y-2 mt-0.5">
+                          {reRuns.run_list.map(run => (
+                            <div key={run.uid} className="space-y-0.5">
+                              <div><span className="font-semibold">uid: </span><span className="font-mono text-xs text-gray-500 break-all">{run.uid}</span></div>
+                              {run.scan_id != null && <div><span className="font-semibold">scan_id: </span>{run.scan_id}</div>}
+                              <div>
+                                <span className="font-semibold">Exit status: </span>
+                                {run.is_open
+                                  ? <span className="text-sky-600">In progress…</span>
+                                  : run.exit_status === 'success'
+                                  ? <span className="text-green-600">success</span>
+                                  : run.exit_status === 'failed'
+                                  ? <span className="text-red-500">{run.exit_status}</span>
+                                  : run.exit_status
+                                  ? <span className="text-amber-500">{run.exit_status}</span>
+                                  : <span className="text-gray-400">unknown</span>
+                                }
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400">No plan running.</p>
+                )}
+              </div>
+            </div>
+
+            {/* Running Plan / Add Item vertical drag handle */}
+            <div
+              className="flex-none w-1 cursor-col-resize bg-gray-200 hover:bg-sky-400 transition-colors"
+              onMouseDown={dragRunningPlan}
+            />
+
+            {/* Add Item */}
+            <div className="flex-1 flex flex-col overflow-hidden">
+              <div className="flex-none px-4 py-[14px] bg-white border-b border-gray-200">
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Add Item</span>
+              </div>
+              <div className="flex-1 overflow-y-auto bg-white p-4">
 
             {allowedPlans.length === 0 ? (
               <p className="text-xs text-gray-400">
@@ -619,11 +753,13 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
               </div>
             )}
           </div>
+        </div>{/* end Add Item column */}
+        </div>{/* end top section */}
 
-          {/* Add Item / Console drag handle */}
+          {/* Top section / Console drag handle */}
           <div
             className="flex-none h-1 cursor-row-resize bg-gray-300 hover:bg-sky-400 transition-colors"
-            onMouseDown={dragAddItem}
+            onMouseDown={dragTopSection}
           />
 
           {/* Console */}

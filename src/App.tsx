@@ -81,7 +81,9 @@ export default function App() {
   const [qsInputApiKey, setQsInputApiKey] = useState(() => localStorage.getItem('qsApiKey') ?? '');
   const [qsProxyUrl, setQsProxyUrl] = useState(() => toQsProxyUrl(loadQsUrl()));
   const [qsConnectionId, setQsConnectionId] = useState(0);
-  const [qsStatus, setQsStatus] = useState<{ manager_state: string; re_state: string; items_in_queue: number; queue_stop_pending: boolean } | null>(null);
+  const [qsStatus, setQsStatus] = useState<{ manager_state: string; re_state: string; items_in_queue: number; queue_stop_pending: boolean; worker_environment_exists: boolean } | null>(null);
+  const [pausePending, setPausePending] = useState(false);
+  const [resumePending, setResumePending] = useState(false);
   const [traceStyles, setTraceStyles] = useState<TraceStyle[]>([]);
   const [cursor1, setCursor1] = useState<number | null>(null);
   const [cursor1Y, setCursor1Y] = useState<number | null>(null);
@@ -194,6 +196,36 @@ export default function App() {
     setQsStatus(null);
     setQsConnectionId(id => id + 1);
   };
+
+  const handleQsEnvToggle = async () => {
+    if (!qsStatus) return;
+    const path = qsStatus.worker_environment_exists ? '/api/environment/close' : '/api/environment/open';
+    const apiKey = localStorage.getItem('qsApiKey') ?? '';
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (apiKey) headers['Authorization'] = `ApiKey ${apiKey}`;
+    try { await fetch(`${qsProxyUrl}${path}`, { method: 'POST', headers, body: '{}' }); } catch (e) { console.error(e); }
+  };
+
+  const handleQsPauseRE = async () => {
+    setPausePending(true);
+    const apiKey = localStorage.getItem('qsApiKey') ?? '';
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (apiKey) headers['Authorization'] = `ApiKey ${apiKey}`;
+    try { await fetch(`${qsProxyUrl}/api/re/pause`, { method: 'POST', headers, body: JSON.stringify({ option: 'deferred' }) }); } catch (e) { console.error(e); }
+  };
+
+  const handleQsResumeRE = async () => {
+    setResumePending(true);
+    const apiKey = localStorage.getItem('qsApiKey') ?? '';
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (apiKey) headers['Authorization'] = `ApiKey ${apiKey}`;
+    try { await fetch(`${qsProxyUrl}/api/re/resume`, { method: 'POST', headers, body: '{}' }); } catch (e) { console.error(e); }
+  };
+
+  useEffect(() => {
+    if (qsStatus?.re_state !== 'running') setPausePending(false);
+    if (qsStatus?.re_state !== 'paused') setResumePending(false);
+  }, [qsStatus?.re_state]);
 
   // Fetch top-level catalog names whenever the server changes
   useEffect(() => {
@@ -414,12 +446,34 @@ export default function App() {
 
         {/* QServer controls (qserver tab only) */}
         {appTab === 'qserver' && (
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-6">
             {qsStatus && (
               <>
-                <span className="text-sky-300 text-xs">Queue: <span className={`font-mono font-medium ${qsStatus.manager_state === 'executing_queue' ? (qsStatus.queue_stop_pending ? 'text-amber-400' : 'text-sky-300 animate-pulse') : 'text-green-400'}`}>{qsStatus.manager_state === 'executing_queue' ? (qsStatus.queue_stop_pending ? 'stop pending' : 'running') : 'stopped'}</span></span>
-                <span className="text-sky-300 text-xs">RE: <span className={`font-mono font-medium ${qsStatus.re_state === 'idle' ? 'text-green-400' : qsStatus.re_state === 'running' ? 'text-sky-300 animate-pulse' : 'text-amber-400'}`}>{qsStatus.re_state}</span></span>
-                <span className="text-sky-300 text-xs">Manager: <span className={`font-mono font-medium ${qsStatus.manager_state === 'idle' ? 'text-green-400' : 'text-amber-400'}`}>{qsStatus.manager_state}</span></span>
+                <button
+                  onClick={handleQsEnvToggle}
+                  className={`text-sm px-3 py-1.5 rounded font-medium transition-colors ${qsStatus.worker_environment_exists ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white'}`}
+                >
+                  {qsStatus.worker_environment_exists ? 'Close Env' : 'Open Env'}
+                </button>
+                <div className="w-px h-6 bg-sky-700 mx-1" />
+                <div className="flex flex-col items-start leading-tight">
+                  <span className="text-sky-400 text-[10px] font-medium uppercase tracking-wide">Queue</span>
+                  <span className={`font-mono font-medium text-xs ${qsStatus.manager_state === 'executing_queue' ? (qsStatus.queue_stop_pending ? 'text-amber-400' : 'text-sky-300 animate-pulse') : qsStatus.manager_state === 'paused' ? 'text-amber-400' : 'text-green-400'}`}>
+                    {qsStatus.manager_state === 'executing_queue' ? (qsStatus.queue_stop_pending ? 'stop pending' : 'running') : qsStatus.manager_state === 'paused' ? 'paused' : 'stopped'}
+                  </span>
+                </div>
+                <div className="flex flex-col items-start leading-tight">
+                  <span className="text-sky-400 text-[10px] font-medium uppercase tracking-wide">RE</span>
+                  <span className={`font-mono font-medium text-xs ${qsStatus.re_state === 'idle' ? 'text-green-400' : qsStatus.re_state === 'running' ? 'text-sky-300 animate-pulse' : 'text-amber-400'}`}>
+                    {qsStatus.re_state}
+                  </span>
+                </div>
+                <div className="flex flex-col items-start leading-tight">
+                  <span className="text-sky-400 text-[10px] font-medium uppercase tracking-wide">Manager</span>
+                  <span className={`font-mono font-medium text-xs ${qsStatus.manager_state === 'idle' ? 'text-green-400' : 'text-amber-400'}`}>
+                    {qsStatus.manager_state}
+                  </span>
+                </div>
                 <div className="w-px h-6 bg-sky-700 mx-1" />
               </>
             )}
@@ -431,15 +485,7 @@ export default function App() {
               onKeyDown={e => e.key === 'Enter' && handleQsConnect()}
               placeholder="http://localhost:60610"
             />
-            <label className="text-sky-300 text-xs font-medium">API Key</label>
-            <input
-              className="bg-sky-900 text-white text-sm px-3 py-1.5 rounded border border-sky-700 focus:outline-none focus:border-sky-400 w-36 placeholder:text-sky-500 font-mono"
-              value={qsInputApiKey}
-              onChange={e => setQsInputApiKey(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleQsConnect()}
-              type="password"
-              placeholder="(optional)"
-            />
+
             <button
               onClick={handleQsConnect}
               className="bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white text-sm px-4 py-1.5 rounded font-medium transition-colors"
