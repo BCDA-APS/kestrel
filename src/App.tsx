@@ -81,7 +81,7 @@ export default function App() {
   const [qsInputApiKey, setQsInputApiKey] = useState(() => localStorage.getItem('qsApiKey') ?? '');
   const [qsProxyUrl, setQsProxyUrl] = useState(() => toQsProxyUrl(loadQsUrl()));
   const [qsConnectionId, setQsConnectionId] = useState(0);
-  const [qsStatus, setQsStatus] = useState<{ manager_state: string; re_state: string; items_in_queue: number } | null>(null);
+  const [qsStatus, setQsStatus] = useState<{ manager_state: string; re_state: string; items_in_queue: number; queue_stop_pending: boolean } | null>(null);
   const [traceStyles, setTraceStyles] = useState<TraceStyle[]>([]);
   const [cursor1, setCursor1] = useState<number | null>(null);
   const [cursor1Y, setCursor1Y] = useState<number | null>(null);
@@ -415,6 +415,14 @@ export default function App() {
         {/* QServer controls (qserver tab only) */}
         {appTab === 'qserver' && (
           <div className="ml-auto flex items-center gap-2">
+            {qsStatus && (
+              <>
+                <span className="text-sky-300 text-xs">Queue: <span className={`font-mono font-medium ${qsStatus.manager_state === 'executing_queue' ? (qsStatus.queue_stop_pending ? 'text-amber-400' : 'text-sky-300 animate-pulse') : 'text-green-400'}`}>{qsStatus.manager_state === 'executing_queue' ? (qsStatus.queue_stop_pending ? 'stop pending' : 'running') : 'stopped'}</span></span>
+                <span className="text-sky-300 text-xs">RE: <span className={`font-mono font-medium ${qsStatus.re_state === 'idle' ? 'text-green-400' : qsStatus.re_state === 'running' ? 'text-sky-300 animate-pulse' : 'text-amber-400'}`}>{qsStatus.re_state}</span></span>
+                <span className="text-sky-300 text-xs">Manager: <span className={`font-mono font-medium ${qsStatus.manager_state === 'idle' ? 'text-green-400' : 'text-amber-400'}`}>{qsStatus.manager_state}</span></span>
+                <div className="w-px h-6 bg-sky-700 mx-1" />
+              </>
+            )}
             <label className="text-sky-300 text-xs font-medium">HTTP URL</label>
             <input
               className="bg-sky-900 text-white text-sm px-3 py-1.5 rounded border border-sky-700 focus:outline-none focus:border-sky-400 w-96 placeholder:text-sky-500 font-mono"
@@ -436,14 +444,6 @@ export default function App() {
               onClick={handleQsConnect}
               className="bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white text-sm px-4 py-1.5 rounded font-medium transition-colors"
             >Connect</button>
-            {qsStatus && (
-              <>
-                <div className="w-px h-6 bg-sky-700 mx-1" />
-                <span className="text-sky-300 text-xs">Manager: <span className={`font-mono font-medium ${qsStatus.manager_state === 'idle' ? 'text-green-400' : 'text-amber-400'}`}>{qsStatus.manager_state}</span></span>
-                <span className="text-sky-300 text-xs">RE: <span className={`font-mono font-medium ${qsStatus.re_state === 'idle' ? 'text-green-400' : qsStatus.re_state === 'running' ? 'text-sky-300 animate-pulse' : 'text-amber-400'}`}>{qsStatus.re_state}</span></span>
-                <span className="text-sky-300 text-xs">Queue: <span className="text-white font-medium">{qsStatus.items_in_queue}</span></span>
-              </>
-            )}
           </div>
         )}
       </header>

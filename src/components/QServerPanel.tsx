@@ -8,7 +8,7 @@ type QueueItem = {
   kwargs: Record<string, unknown>;
   item_uid: string;
   status?: string;
-  result?: { exit_status?: string; msg?: string };
+  result?: { exit_status?: string; msg?: string; time_start?: number; time_stop?: number };
 };
 
 type PlanParam = {
@@ -25,12 +25,15 @@ type AllowedPlan = {
 };
 
 type ServerStatus = {
-  manager_state: string;   // 'idle' | 'running' | 'paused' | ...
+  manager_state: string;   // 'idle' | 'executing_queue' | 'paused' | ...
   re_state: string;        // 'idle' | 'running' | 'paused' | ...
   items_in_queue: number;
   items_in_history: number;
   running_item_uid: string | null;
   worker_environment_exists: boolean;
+  queue_stop_pending: boolean;
+  queue_autostart_enabled: boolean;
+  plan_queue_mode: { loop: boolean };
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -56,8 +59,8 @@ function planColor(name: string | undefined) {
   return colors[h % colors.length];
 }
 
-function kwargsSummary(kwargs: Record<string, unknown>): string {
-  return Object.entries(kwargs)
+function kwargsSummary(kwargs: Record<string, unknown> | null | undefined): string {
+  return Object.entries(kwargs ?? {})
     .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
     .join(', ');
 }
@@ -83,36 +86,57 @@ function QueueCard({ item, running, onDelete }: {
   const cls = planColor(item.name);
   return (
     <div className={`relative border rounded p-2 text-xs ${running ? 'ring-2 ring-sky-500 ' + cls : cls}`}>
-      <div className="flex items-start gap-1">
-        <span className="font-semibold flex-1 truncate">{item.name}</span>
-        {running && <span className="shrink-0 animate-pulse text-sky-600 font-bold">▶</span>}
-        {!running && (
-          <button
-            onClick={onDelete}
-            className="shrink-0 text-gray-400 hover:text-red-500 leading-none ml-1"
-            title="Remove"
-          >×</button>
-        )}
-      </div>
-      {Object.keys(item.kwargs).length > 0 && (
-        <p className="text-gray-500 mt-0.5 truncate">{kwargsSummary(item.kwargs)}</p>
+      {running ? (
+        <div className="flex items-center gap-2">
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold truncate">{item.name}</p>
+            {Object.keys(item.kwargs ?? {}).length > 0 && (
+              <p className="text-gray-500 mt-0.5 truncate">{kwargsSummary(item.kwargs)}</p>
+            )}
+          </div>
+          <span className="shrink-0 animate-pulse text-sky-600 font-bold text-xl leading-none">▶</span>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-start gap-1">
+            <span className="font-semibold flex-1 truncate">{item.name}</span>
+            <button
+              onClick={onDelete}
+              className="shrink-0 text-gray-400 hover:text-red-500 leading-none ml-1"
+              title="Remove"
+            >×</button>
+          </div>
+          {Object.keys(item.kwargs ?? {}).length > 0 && (
+            <p className="text-gray-500 mt-0.5 truncate">{kwargsSummary(item.kwargs)}</p>
+          )}
+        </>
       )}
     </div>
   );
 }
 
+function formatDateTime(ts: number | undefined): string {
+  if (!ts) return '';
+  const d = new Date(ts * 1000);
+  const date = d.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return `${date} ${time}`;
+}
+
 function HistoryCard({ item }: { item: QueueItem }) {
   const cls = planColor(item.name);
   const exitStatus = item.result?.exit_status ?? item.status ?? '';
+  const stopTime = formatDateTime(item.result?.time_stop);
   return (
     <div className={`border rounded p-2 text-xs ${cls}`}>
       <div className="flex items-start gap-1">
         <span className="font-semibold flex-1 truncate">{item.name}</span>
+        {stopTime && <span className="shrink-0 text-[10px] text-gray-500">{stopTime}</span>}
         <span className={`shrink-0 text-[10px] px-1 py-0.5 rounded font-medium ${statusColor(exitStatus)}`}>
           {exitStatus || '?'}
         </span>
       </div>
-      {Object.keys(item.kwargs).length > 0 && (
+      {Object.keys(item.kwargs ?? {}).length > 0 && (
         <p className="text-gray-500 mt-0.5 truncate">{kwargsSummary(item.kwargs)}</p>
       )}
     </div>
@@ -143,12 +167,13 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
   const [consoleLines, setConsoleLines] = useState<string[]>([]);
   const [consoleOn, setConsoleOn] = useState(true);
   const [wsStatus, setWsStatus] = useState<'connecting' | 'open' | 'closed' | 'error'>('connecting');
+  const consoleTextOffsetRef = useRef<number>(0);
   const consoleEndRef = useRef<HTMLDivElement>(null);
 
   // Resize state
-  const [sidebarWidth, setSidebarWidth] = useState(256);
-  const [queueHeight, setQueueHeight] = useState(160);
-  const [addItemHeight, setAddItemHeight] = useState(220);
+  const [sidebarWidth, setSidebarWidth] = useState(500);
+  const [queueHeight, setQueueHeight] = useState(600);
+  const [addItemHeight, setAddItemHeight] = useState(700);
 
   const dragSidebar = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -201,7 +226,7 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
       if (st) setStatus(st);
       if (q) {
         setQueue(q.items ?? []);
-        setRunningItem(q.running_item ?? null);
+        setRunningItem(q.running_item?.item_uid ? q.running_item : null);
       }
       if (h) setHistory([...(h.items ?? [])].reverse());
     } catch { /* ignore */ }
@@ -217,7 +242,9 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
   useEffect(() => {
     api('/api/plans/allowed')
       .then(j => {
-        const plans: AllowedPlan[] = Object.values(j.plans_allowed ?? {}) as AllowedPlan[];
+        const all: AllowedPlan[] = Object.values(j.plans_allowed ?? {}) as AllowedPlan[];
+        const seen = new Set<string>();
+        const plans = all.filter(p => !seen.has(p.name) && seen.add(p.name));
         plans.sort((a, b) => a.name.localeCompare(b.name));
         setAllowedPlans(plans);
         if (plans.length > 0 && !selectedPlan) setSelectedPlan(plans[0].name);
@@ -242,16 +269,27 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
   // ── Report status to parent ───────────────────────────────────────────────
   useEffect(() => { onStatusChange?.(status); }, [status, onStatusChange]);
 
-  // ── Console polling (/api/console_output every second) ───────────────────
+  // ── Console polling (full buffer diff via /api/console_output) ──────────────
   useEffect(() => {
     if (!consoleOn) { setWsStatus('closed'); return; }
     setWsStatus('connecting');
+    consoleTextOffsetRef.current = 0;
     let running = true;
+    let consecutiveErrors = 0;
 
     const poll = async () => {
       if (!running) return;
       try {
-        const r = await fetch(`${proxyUrl}/api/console_output`);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        let r: Response;
+        try {
+          r = await fetch(`${proxyUrl}/api/console_output`, { signal: controller.signal, cache: 'no-store' });
+          clearTimeout(timeout);
+        } catch (e) {
+          clearTimeout(timeout);
+          throw e;
+        }
         if (!r.ok) {
           if (r.status === 401) {
             setWsStatus('closed');
@@ -264,12 +302,23 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
         const data = await r.json();
         if (!running) return;
         const text: string = data.text ?? '';
-        const lines = text.split('\n').filter((l: string) => l.trim());
-        setConsoleLines(lines.slice(-500));
+        const offset = consoleTextOffsetRef.current;
+        if (text.length > offset) {
+          const newText = text.slice(offset);
+          const newLines = newText.split('\n').filter((l: string) => l.trim());
+          if (offset === 0) {
+            setConsoleLines(newLines.slice(-500));
+          } else {
+            setConsoleLines(prev => [...prev, ...newLines].slice(-500));
+          }
+          consoleTextOffsetRef.current = text.length;
+        }
+        consecutiveErrors = 0;
         setWsStatus('open');
-      } catch (err) {
+      } catch {
         if (!running) return;
-        setWsStatus('error');
+        consecutiveErrors++;
+        if (consecutiveErrors >= 3) setWsStatus('error');
       }
       if (running) setTimeout(poll, 1000);
     };
@@ -296,7 +345,33 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
 
   const handleStopRE = async () => {
     try {
-      await api('/api/queue/stop', {});
+      if (status?.queue_stop_pending) {
+        await api('/api/queue/stop/cancel', {});
+      } else {
+        await api('/api/queue/stop', {});
+      }
+      refresh();
+    } catch (e) { console.error(e); }
+  };
+
+  const handleOpenEnv = async () => {
+    try { await api('/api/environment/open', {}); refresh(); } catch (e) { console.error(e); }
+  };
+
+  const handleCloseEnv = async () => {
+    try { await api('/api/environment/close', {}); refresh(); } catch (e) { console.error(e); }
+  };
+
+  const handleToggleAutostart = async () => {
+    try {
+      await api('/api/queue/autostart', { enable: !status?.queue_autostart_enabled });
+      refresh();
+    } catch (e) { console.error(e); }
+  };
+
+  const handleToggleLoop = async () => {
+    try {
+      await api('/api/queue/mode/set', { mode: { loop: !status?.plan_queue_mode?.loop } });
       refresh();
     } catch (e) { console.error(e); }
   };
@@ -358,10 +433,29 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
         <div className="flex-none bg-gray-50 border-r border-gray-200 flex flex-col overflow-hidden" style={{ width: sidebarWidth }}>
 
           {/* Queue */}
-          <div className="flex-none px-3 py-2 bg-white border-b border-gray-200 flex items-center gap-2">
+          <div className="flex-none px-3 py-4 bg-white border-b border-gray-200 flex items-center gap-2">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex-1">
               Queue · {queue.length + (runningItem ? 1 : 0)}
             </span>
+            <button
+              onClick={handleToggleAutostart}
+              title={status?.queue_autostart_enabled ? 'Auto-start enabled — click to disable' : 'Auto-start disabled — click to enable'}
+              className={`text-xs px-2 py-0.5 rounded font-medium transition-colors ${
+                status?.queue_autostart_enabled
+                  ? 'bg-emerald-500 hover:bg-emerald-400 text-white'
+                  : 'bg-gray-200 hover:bg-gray-300 text-gray-600'
+              }`}
+            >Auto</button>
+            <button
+              onClick={handleToggleLoop}
+              title={status?.plan_queue_mode?.loop ? 'Loop enabled — click to disable' : 'Loop disabled — click to enable'}
+              className={`text-xs px-2 py-0.5 rounded font-medium transition-colors ${
+                status?.plan_queue_mode?.loop
+                  ? 'bg-violet-500 hover:bg-violet-400 text-white'
+                  : 'bg-gray-200 hover:bg-gray-300 text-gray-600'
+              }`}
+            >Loop</button>
+            <div className="w-px h-4 bg-gray-300 mx-1" />
             <button
               onClick={handleStartRE}
               disabled={isRERunning}
@@ -370,8 +464,13 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
             <button
               onClick={handleStopRE}
               disabled={isREIdle}
-              className="text-xs px-2 py-0.5 rounded bg-red-500 hover:bg-red-400 disabled:bg-gray-200 disabled:text-gray-400 text-white font-medium transition-colors"
-            >Stop</button>
+              className={`text-xs px-2 py-0.5 rounded font-medium transition-colors disabled:bg-gray-200 disabled:text-gray-400 ${
+                status?.queue_stop_pending
+                  ? 'bg-amber-400 hover:bg-amber-300 text-white ring-2 ring-amber-300 ring-offset-1 animate-pulse'
+                  : 'bg-red-500 hover:bg-red-400 text-white'
+              }`}
+              title={status?.queue_stop_pending ? 'Stop pending — click to cancel' : 'Stop queue after current plan'}
+            >{status?.queue_stop_pending ? 'Cancel Stop' : 'Stop'}</button>
           </div>
 
           <div className="overflow-y-auto p-2 space-y-1.5 min-h-0" style={{ height: queueHeight }}>
@@ -398,21 +497,28 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
           />
 
           {/* RE status indicator */}
-          <div className="flex-none border-t border-b border-gray-200 bg-white px-3 py-2 flex items-center gap-2">
-            <span className={`w-2 h-2 rounded-full shrink-0 ${isRERunning ? 'bg-sky-500 animate-pulse' : isREIdle ? 'bg-green-500' : 'bg-amber-400'}`} />
-            <span className="text-xs text-gray-600 font-medium">
-              {!status?.worker_environment_exists ? 'Worker not open' : `RE: ${reState}`}
+          <div className="flex-none border-t border-b border-gray-200 bg-white pl-3 pr-4 py-4 flex items-center gap-2">
+            <span className={`w-3 h-3 rounded-full shrink-0 ${
+              !status?.worker_environment_exists ? 'bg-red-500' :
+              isRERunning ? 'bg-sky-500 animate-pulse' : 'bg-green-500'
+            }`} />
+            <span className="text-sm text-gray-600 font-medium flex-1">
+              {!status?.worker_environment_exists ? 'RE Env not open' : `RE: ${reState}`}
             </span>
-            {!status?.worker_environment_exists && status && (
+            {status && (
               <button
-                onClick={handleStartRE}
-                className="ml-auto text-xs text-sky-600 hover:text-sky-800 font-medium"
-              >Open</button>
+                onClick={status.worker_environment_exists ? handleCloseEnv : handleOpenEnv}
+                className={`text-xs px-2 py-0.5 rounded font-medium transition-colors ${
+                  status.worker_environment_exists
+                    ? 'bg-red-100 text-red-600 hover:bg-red-200'
+                    : 'bg-green-100 text-green-700 hover:bg-green-200'
+                }`}
+              >{status.worker_environment_exists ? 'Close Env' : 'Open Env'}</button>
             )}
           </div>
 
           {/* History */}
-          <div className="flex-none px-3 py-2 bg-white border-b border-gray-200">
+          <div className="flex-none px-3 py-4 bg-white border-b border-gray-200">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
               History · {history.length}
             </span>
@@ -435,9 +541,12 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
 
         {/* Right main area */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Add Item */}
+          {/* Add Item header — height matches Queue header (py-4 + button height) */}
+          <div className="flex-none px-4 py-[14px] bg-white border-b border-gray-200">
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Add Item</span>
+          </div>
+          {/* Add Item body */}
           <div className="overflow-y-auto bg-white border-b border-gray-200 p-4" style={{ height: addItemHeight }}>
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Add Item</h3>
 
             {allowedPlans.length === 0 ? (
               <p className="text-xs text-gray-400">
@@ -519,7 +628,7 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
 
           {/* Console */}
           <div className="flex-1 flex flex-col overflow-hidden bg-gray-900">
-            <div className="flex-none flex items-center gap-3 px-3 py-1.5 bg-gray-800 border-b border-gray-700">
+            <div className="flex-none flex items-center gap-3 px-3 py-4 bg-gray-800 border-b border-gray-700">
               <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide flex-1">Console Output</span>
               <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
                 wsStatus === 'open' ? 'bg-green-800 text-green-300' :
@@ -528,7 +637,14 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
                 'bg-gray-700 text-gray-400'
               }`}>{wsStatus}</span>
               <button
-                onClick={() => setConsoleLines([])}
+                onClick={async () => {
+                  // Advance the offset to the current buffer end so old content won't reappear
+                  try {
+                    const r = await fetch(`${proxyUrl}/api/console_output`, { cache: 'no-store' });
+                    if (r.ok) { const d = await r.json(); consoleTextOffsetRef.current = (d.text ?? '').length; }
+                  } catch { /* ignore */ }
+                  setConsoleLines([]);
+                }}
                 className="text-xs text-gray-500 hover:text-gray-300"
               >Clear</button>
               <label className="flex items-center gap-1.5 cursor-pointer select-none">
