@@ -251,9 +251,13 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
   // Console
   const [consoleLines, setConsoleLines] = useState<string[]>([]);
   const [consoleOn, setConsoleOn] = useState(true);
+  const [maxLines, setMaxLines] = useState(1000);
+  const maxLinesRef = useRef(1000);
   const [wsStatus, setWsStatus] = useState<'connecting' | 'open' | 'closed' | 'error'>('connecting');
   const [consoleError, setConsoleError] = useState<string>('');
   const consoleEndRef = useRef<HTMLDivElement>(null);
+  const consoleScrollRef = useRef<HTMLDivElement>(null);
+  const autoScrollRef = useRef(true);
 
   const [reRuns, setReRuns] = useState<RERunsData | null>(null);
 
@@ -430,7 +434,7 @@ setReRuns(runs ?? null);
           if (trimmed) newLines.push(trimmed);
         }
         if (newLines.length > 0) {
-          setConsoleLines(prev => [...prev, ...newLines].slice(-500));
+          setConsoleLines(prev => [...prev, ...newLines].slice(-maxLinesRef.current));
         }
       } catch { /* ignore malformed messages */ }
     };
@@ -439,7 +443,9 @@ setReRuns(runs ?? null);
   }, [proxyUrl, consoleOn]);
 
   useEffect(() => {
-    consoleEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (autoScrollRef.current) {
+      consoleEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [consoleLines]);
 
   // ── Actions ──────────────────────────────────────────────────────────────
@@ -1166,6 +1172,17 @@ setReRuns(runs ?? null);
                 onClick={() => setConsoleLines([])}
                 className="text-xs text-gray-500 hover:text-gray-300"
               >Clear</button>
+              <label className="flex items-center gap-1 text-xs text-gray-500">
+                Max
+                <input
+                  type="number"
+                  min={100}
+                  step={100}
+                  value={maxLines}
+                  onChange={e => { const v = Math.max(100, Number(e.target.value) || 1000); setMaxLines(v); maxLinesRef.current = v; }}
+                  className="w-16 bg-gray-700 text-gray-300 rounded px-1 py-0.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-sky-500"
+                />
+              </label>
               <label className="flex items-center gap-1.5 cursor-pointer select-none">
                 <span className="text-xs text-gray-500">Live</span>
                 <span
@@ -1176,7 +1193,15 @@ setReRuns(runs ?? null);
                 </span>
               </label>
             </div>
-            <div className="flex-1 overflow-y-auto p-3 font-mono text-xs text-green-300 leading-relaxed">
+            <div
+              ref={consoleScrollRef}
+              onScroll={() => {
+                const el = consoleScrollRef.current;
+                if (!el) return;
+                autoScrollRef.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
+              }}
+              className="flex-1 overflow-y-auto p-3 font-mono text-xs text-green-300 leading-relaxed"
+            >
               {consoleLines.length === 0 ? (
                 <span className="text-gray-600">
                   {consoleOn ? 'Waiting for console output…' : 'Console paused.'}
