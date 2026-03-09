@@ -89,14 +89,64 @@ function parseParamValue(s: string): unknown {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function QueueCard({ item, running, onDelete }: {
+function DragHandle({ onMouseDown }: { onMouseDown: () => void }) {
+  return (
+    <div
+      className="shrink-0 flex gap-[3px] items-center text-gray-400 hover:text-gray-600 cursor-grab active:cursor-grabbing py-0.5 px-0.5"
+      onMouseDown={onMouseDown}
+      onClick={e => e.stopPropagation()}
+      title="Drag to reorder"
+    >
+      <div className="flex flex-col gap-[3px]">
+        <div className="w-[3px] h-[3px] rounded-full bg-current" />
+        <div className="w-[3px] h-[3px] rounded-full bg-current" />
+        <div className="w-[3px] h-[3px] rounded-full bg-current" />
+      </div>
+      <div className="flex flex-col gap-[3px]">
+        <div className="w-[3px] h-[3px] rounded-full bg-current" />
+        <div className="w-[3px] h-[3px] rounded-full bg-current" />
+        <div className="w-[3px] h-[3px] rounded-full bg-current" />
+      </div>
+    </div>
+  );
+}
+
+function QueueCard({ item, running, selected, onSelect, onDelete, onEdit, onDuplicate, dragging, onDragStart, onDragEnd, onDragOver }: {
   item: QueueItem;
   running: boolean;
+  selected?: boolean;
+  onSelect?: (e: React.MouseEvent) => void;
   onDelete: () => void;
+  onEdit?: () => void;
+  onDuplicate?: () => void;
+  dragging?: boolean;
+  onDragStart?: (e: React.DragEvent) => void;
+  onDragEnd?: () => void;
+  onDragOver?: (e: React.DragEvent) => void;
 }) {
   const cls = planColor(item.name);
+  const dragFromHandle = useRef(false);
+  const cardCls = [
+    'relative border rounded p-2 text-xs select-none',
+    cls,
+    running ? 'ring-2 ring-sky-500' : '',
+    !running && selected ? 'ring-2 ring-sky-400 ring-offset-1' : '',
+    dragging ? 'opacity-40' : '',
+  ].filter(Boolean).join(' ');
   return (
-    <div className={`relative border rounded p-2 text-xs ${running ? 'ring-2 ring-sky-500 ' + cls : cls}`}>
+    <div
+      draggable={!running}
+      onDragStart={e => {
+        if (!dragFromHandle.current) { e.preventDefault(); return; }
+        dragFromHandle.current = false;
+        onDragStart?.(e);
+      }}
+      onDragEnd={onDragEnd}
+      onDragOver={onDragOver}
+      onClick={!running ? onSelect : undefined}
+      onDoubleClick={!running ? onEdit : undefined}
+      className={cardCls}
+    >
       {running ? (
         <div className="flex items-center gap-2">
           <div className="flex-1 min-w-0">
@@ -108,19 +158,32 @@ function QueueCard({ item, running, onDelete }: {
           <span className="shrink-0 animate-pulse text-sky-600 font-bold text-xl leading-none">▶</span>
         </div>
       ) : (
-        <>
-          <div className="flex items-start gap-1">
-            <span className="font-semibold flex-1 truncate">{item.name}</span>
-            <button
-              onClick={onDelete}
-              className="shrink-0 text-gray-400 hover:text-red-500 leading-none ml-1"
-              title="Remove"
-            >×</button>
+        <div className="flex items-center gap-2">
+          <DragHandle onMouseDown={() => { dragFromHandle.current = true; }} />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold min-w-0 flex-1 truncate pr-1">{item.name}</span>
+              <button
+                onClick={e => { e.stopPropagation(); onDuplicate?.(); }}
+                className="shrink-0 text-gray-400 hover:text-emerald-500 leading-none text-base font-bold"
+                title="Duplicate"
+              >⧉</button>
+              <button
+                onClick={e => { e.stopPropagation(); onEdit?.(); }}
+                className="shrink-0 text-gray-400 hover:text-sky-500 leading-none text-xl font-bold"
+                title="Edit"
+              >✎</button>
+              <button
+                onClick={e => { e.stopPropagation(); onDelete(); }}
+                className="shrink-0 text-gray-400 hover:text-red-500 leading-none text-xl font-bold"
+                title="Remove"
+              >×</button>
+            </div>
+            {Object.keys(item.kwargs ?? {}).length > 0 && (
+              <p className="text-gray-500 mt-0.5 truncate">{kwargsSummary(item.kwargs)}</p>
+            )}
           </div>
-          {Object.keys(item.kwargs ?? {}).length > 0 && (
-            <p className="text-gray-500 mt-0.5 truncate">{kwargsSummary(item.kwargs)}</p>
-          )}
-        </>
+        </div>
       )}
     </div>
   );
@@ -134,7 +197,7 @@ function formatDateTime(ts: number | undefined): string {
   return `${date} ${time}`;
 }
 
-function HistoryCard({ item }: { item: QueueItem }) {
+function HistoryCard({ item, onCopyToQueue }: { item: QueueItem; onCopyToQueue?: () => void }) {
   const cls = planColor(item.name);
   const exitStatus = item.result?.exit_status ?? item.status ?? '';
   const stopTime = formatDateTime(item.result?.time_stop);
@@ -146,6 +209,11 @@ function HistoryCard({ item }: { item: QueueItem }) {
         <span className={`shrink-0 text-[10px] px-1 py-0.5 rounded font-medium ${statusColor(exitStatus)}`}>
           {exitStatus || '?'}
         </span>
+        <button
+          onClick={onCopyToQueue}
+          className="shrink-0 text-gray-400 hover:text-emerald-500 leading-none text-base font-bold"
+          title="Copy to queue"
+        >⧉</button>
       </div>
       {Object.keys(item.kwargs ?? {}).length > 0 && (
         <p className="text-gray-500 mt-0.5 truncate">{kwargsSummary(item.kwargs)}</p>
@@ -168,9 +236,10 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
   const [history, setHistory] = useState<QueueItem[]>([]);
   const [allowedPlans, setAllowedPlans] = useState<AllowedPlan[]>([]);
 
-  // Add item form
+  // Add / edit item form
   const [selectedPlan, setSelectedPlan] = useState('');
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
+  const [editingItem, setEditingItem] = useState<QueueItem | null>(null);
   const [submitMsg, setSubmitMsg] = useState('');
   const [submitError, setSubmitError] = useState('');
 
@@ -183,10 +252,24 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
   const [consoleLines, setConsoleLines] = useState<string[]>([]);
   const [consoleOn, setConsoleOn] = useState(true);
   const [wsStatus, setWsStatus] = useState<'connecting' | 'open' | 'closed' | 'error'>('connecting');
-  const consoleTextOffsetRef = useRef<number>(0);
+  const [consoleError, setConsoleError] = useState<string>('');
   const consoleEndRef = useRef<HTMLDivElement>(null);
+  // Full text content of the last rendered poll response.
+  const lastTextRef = useRef<string>('');
+  // Set by Clear to the text that was visible at that moment. Polls whose text
+  // matches this value are suppressed so the old content doesn't reappear.
+  // Reset to null when the server's text actually changes (new scan output).
+  const clearedTextRef = useRef<string | null>(null);
 
   const [reRuns, setReRuns] = useState<RERunsData | null>(null);
+
+  // Queue selection + drag state
+  const [selectedUids, setSelectedUids] = useState<Set<string>>(new Set());
+  const [dragUid, setDragUid] = useState<string | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  // Refs mirror the state so callbacks always see the latest values regardless of closure age
+  const dragUidRef = useRef<string | null>(null);
+  const dropIndexRef = useRef<number | null>(null);
 
   // Resize state
   const [sidebarWidth, setSidebarWidth] = useState(500);
@@ -283,8 +366,9 @@ setReRuns(runs ?? null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proxyUrl]);
 
-  // ── When plan changes, reset param values ────────────────────────────────
+  // ── When plan changes, reset param values (skip when loading an item for editing) ──
   useEffect(() => {
+    if (editingItem) return;
     const plan = allowedPlans.find(p => p.name === selectedPlan);
     if (!plan) { setParamValues({}); return; }
     const init: Record<string, string> = {};
@@ -294,7 +378,7 @@ setReRuns(runs ?? null);
       }
     }
     setParamValues(init);
-  }, [selectedPlan, allowedPlans]);
+  }, [selectedPlan, allowedPlans, editingItem]);
 
   // ── Report status to parent ───────────────────────────────────────────────
   useEffect(() => { onStatusChange?.(status); }, [status, onStatusChange]);
@@ -306,22 +390,33 @@ setReRuns(runs ?? null);
     if (status?.re_state === 'idle') setAbortPending(false);
   }, [status?.re_state]);
 
+  // ── Escape clears selection ───────────────────────────────────────────────
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setSelectedUids(new Set()); lastSelectedUidRef.current = null; }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
   // ── Console polling (full buffer diff via /api/console_output) ──────────────
   useEffect(() => {
     if (!consoleOn) { setWsStatus('closed'); return; }
     setWsStatus('connecting');
-    consoleTextOffsetRef.current = 0;
     let running = true;
     let consecutiveErrors = 0;
 
     const poll = async () => {
       if (!running) return;
       try {
+        const apiKey = localStorage.getItem('qsApiKey') ?? '';
+        const headers: Record<string, string> = {};
+        if (apiKey) headers['Authorization'] = `ApiKey ${apiKey}`;
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 5000);
+        const timeout = setTimeout(() => controller.abort(), 10000);
         let r: Response;
         try {
-          r = await fetch(`${proxyUrl}/api/console_output`, { signal: controller.signal, cache: 'no-store' });
+          r = await fetch(`${proxyUrl}/api/console_output`, { signal: controller.signal, cache: 'no-store', headers });
           clearTimeout(timeout);
         } catch (e) {
           clearTimeout(timeout);
@@ -330,32 +425,44 @@ setReRuns(runs ?? null);
         if (!r.ok) {
           if (r.status === 401) {
             setWsStatus('closed');
+            setConsoleError('HTTP 401 — server requires read:console permission scope');
             setConsoleLines(['Console unavailable: server requires read:console scope.',
               'See docs/qserver-setup.md for the permissions config.']);
+            if (running) setTimeout(poll, 5000);
             return;
           }
           throw new Error(`HTTP ${r.status}`);
         }
         const data = await r.json();
         if (!running) return;
-        const text: string = data.text ?? '';
-        const offset = consoleTextOffsetRef.current;
-        if (text.length > offset) {
-          const newText = text.slice(offset);
-          const newLines = newText.split('\n').filter((l: string) => l.trim());
-          if (offset === 0) {
-            setConsoleLines(newLines.slice(-500));
-          } else {
-            setConsoleLines(prev => [...prev, ...newLines].slice(-500));
-          }
-          consoleTextOffsetRef.current = text.length;
+        const rawText: string = data.text ?? '';
+        const text = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        lastTextRef.current = text;
+        // After Clear, suppress until the server's text actually changes.
+        if (clearedTextRef.current !== null && text === clearedTextRef.current) {
+          // Same content as at clear time — stay empty, wait for new output.
+        } else {
+          clearedTextRef.current = null;  // lift suppression once content changes
+          // eslint-disable-next-line no-control-regex
+          const stripAnsi = (s: string) => s
+            .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '') // OSC sequences
+            .replace(/\x1b[@-Z\\-_]/g, '')                       // 2-char ESC sequences
+            .replace(/\x1b\[[\x20-\x3f]*[\x40-\x7e]/g, '');     // CSI sequences
+          const lines = text.split('\n')
+            .map(l => stripAnsi(l).trimEnd())
+            .filter(l => l.length > 0)
+            .slice(-500);
+          if (lines.length > 0) setConsoleLines(lines);
         }
         consecutiveErrors = 0;
+        setConsoleError('');
         setWsStatus('open');
-      } catch {
+      } catch (e) {
         if (!running) return;
         consecutiveErrors++;
-        if (consecutiveErrors >= 3) setWsStatus('error');
+        const msg = e instanceof Error ? e.message : String(e);
+        if (consecutiveErrors === 1) console.error('[QServer console] poll error:', e);
+        if (consecutiveErrors >= 3) { setWsStatus('error'); setConsoleError(msg); }
       }
       if (running) setTimeout(poll, 1000);
     };
@@ -425,6 +532,46 @@ setReRuns(runs ?? null);
     } catch (e) { console.error(e); }
   };
 
+  const handleClearQueue = async () => {
+    if (!window.confirm('Are you sure you want to clear the queue?')) return;
+    try { await api('/api/queue/clear'); refresh(); } catch (e) { console.error(e); }
+  };
+
+  const handleClearHistory = async () => {
+    if (!window.confirm('Are you sure you want to clear the history?')) return;
+    try { await api('/api/history/clear'); refresh(); } catch (e) { console.error(e); }
+  };
+
+  const handleCopyToQueue = async (item: QueueItem) => {
+    try {
+      await api('/api/queue/item/add', { item: { item_type: 'plan', name: item.name, kwargs: item.kwargs } });
+      refresh();
+    } catch (e) { console.error(e); }
+  };
+
+  const handleSaveHistory = () => {
+    const rows = [
+      ['start_time', 'stop_time', 'name', 'kwargs', 'exit_status', 'scan_ids', 'run_uids'],
+      ...history.map(item => [
+        item.result?.time_start != null ? new Date(item.result.time_start * 1000).toLocaleString() : '',
+        item.result?.time_stop != null ? new Date(item.result.time_stop * 1000).toLocaleString() : '',
+        item.name,
+        kwargsSummary(item.kwargs),
+        item.result?.exit_status ?? item.status ?? '',
+        (item.result?.scan_ids ?? []).join(';'),
+        (item.result?.run_uids ?? []).join(';'),
+      ]),
+    ];
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `qserver_history_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleAddToQueue = async () => {
     setSubmitMsg(''); setSubmitError('');
     const plan = allowedPlans.find(p => p.name === selectedPlan);
@@ -439,6 +586,34 @@ setReRuns(runs ?? null);
         item: { item_type: 'plan', name: selectedPlan, kwargs },
       });
       setSubmitMsg(`Added: ${res.item?.item_uid?.slice(0, 8) ?? 'ok'}`);
+      refresh();
+    } catch (e) { setSubmitError(String(e)); }
+  };
+
+  const handleEditItem = (item: QueueItem) => {
+    setSubmitMsg(''); setSubmitError('');
+    setEditingItem(item);
+    setSelectedPlan(item.name);
+    const vals: Record<string, string> = {};
+    for (const [k, v] of Object.entries(item.kwargs ?? {})) {
+      vals[k] = typeof v === 'string' ? v : JSON.stringify(v);
+    }
+    setParamValues(vals);
+  };
+
+  const handleUpdateQueue = async () => {
+    if (!editingItem) return;
+    setSubmitMsg(''); setSubmitError('');
+    const kwargs: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(paramValues)) {
+      const parsed = parseParamValue(v);
+      if (parsed !== undefined) kwargs[k] = parsed;
+    }
+    try {
+      await api('/api/queue/item/update', {
+        item: { item_type: 'plan', name: selectedPlan, kwargs, item_uid: editingItem.item_uid },
+      });
+      setEditingItem(null);
       refresh();
     } catch (e) { setSubmitError(String(e)); }
   };
@@ -463,7 +638,144 @@ setReRuns(runs ?? null);
 
   const handleDelete = async (uid: string) => {
     try {
-      await api('/api/queue/item/remove', { item_uid: uid });
+      await api('/api/queue/item/remove', { uid });
+      setSelectedUids(prev => { const next = new Set(prev); next.delete(uid); return next; });
+      refresh();
+    } catch (e) { console.error(e); }
+  };
+
+  const handleDuplicate = async (item: QueueItem) => {
+    try {
+      await api('/api/queue/item/add', { item: { item_type: 'plan', name: item.name, kwargs: item.kwargs } });
+      refresh();
+    } catch (e) { console.error(e); }
+  };
+
+  const lastSelectedUidRef = useRef<string | null>(null);
+
+  const toggleSelect = (uid: string) => {
+    setSelectedUids(prev => {
+      const next = new Set(prev);
+      if (next.has(uid)) next.delete(uid); else next.add(uid);
+      return next;
+    });
+  };
+
+  const handleSelect = (uid: string, e: React.MouseEvent) => {
+    if (e.shiftKey && lastSelectedUidRef.current !== null) {
+      // Range selection — anchor stays the same
+      const lastIdx = queue.findIndex(i => i.item_uid === lastSelectedUidRef.current);
+      const currIdx = queue.findIndex(i => i.item_uid === uid);
+      if (lastIdx >= 0 && currIdx >= 0) {
+        const [from, to] = lastIdx <= currIdx ? [lastIdx, currIdx] : [currIdx, lastIdx];
+        const rangeUids = new Set(queue.slice(from, to + 1).map(i => i.item_uid));
+        setSelectedUids(prev => new Set([...prev, ...rangeUids]));
+        return; // don't move the anchor
+      }
+    } else if (e.ctrlKey || e.metaKey) {
+      // Discrete toggle
+      toggleSelect(uid);
+    } else {
+      // Plain click — deselect if already the only selection, otherwise single select
+      if (selectedUids.has(uid) && selectedUids.size === 1) {
+        setSelectedUids(new Set());
+        lastSelectedUidRef.current = null;
+        return;
+      }
+      setSelectedUids(new Set([uid]));
+    }
+    lastSelectedUidRef.current = uid;
+  };
+
+  const handleMoveSelected = async (direction: 'up' | 'down' | 'top' | 'bottom') => {
+    const selected = queue.filter(i => selectedUids.has(i.item_uid));
+    if (selected.length === 0) return;
+    let localQueue = [...queue];
+    try {
+      if (direction === 'top') {
+        for (const item of [...selected].reverse()) {
+          await api('/api/queue/item/move', { uid: item.item_uid, pos_dest: 'front' });
+          localQueue = [item, ...localQueue.filter(i => i.item_uid !== item.item_uid)];
+        }
+      } else if (direction === 'bottom') {
+        for (const item of selected) {
+          await api('/api/queue/item/move', { uid: item.item_uid, pos_dest: 'back' });
+          localQueue = [...localQueue.filter(i => i.item_uid !== item.item_uid), item];
+        }
+      } else if (direction === 'up') {
+        const firstIdx = localQueue.findIndex(i => i.item_uid === selected[0].item_uid);
+        if (firstIdx === 0) return;
+        for (const item of selected) {
+          const idx = localQueue.findIndex(i => i.item_uid === item.item_uid);
+          if (idx <= 0) continue;
+          await api('/api/queue/item/move', { uid: item.item_uid, before_uid: localQueue[idx - 1].item_uid });
+          const q = [...localQueue]; q.splice(idx, 1); q.splice(idx - 1, 0, item); localQueue = q;
+        }
+      } else if (direction === 'down') {
+        const lastIdx = localQueue.findIndex(i => i.item_uid === selected[selected.length - 1].item_uid);
+        if (lastIdx >= localQueue.length - 1) return;
+        for (const item of [...selected].reverse()) {
+          const idx = localQueue.findIndex(i => i.item_uid === item.item_uid);
+          if (idx >= localQueue.length - 1) continue;
+          if (idx + 2 < localQueue.length) {
+            await api('/api/queue/item/move', { uid: item.item_uid, before_uid: localQueue[idx + 2].item_uid });
+            const q = [...localQueue]; q.splice(idx, 1); q.splice(idx + 1, 0, item); localQueue = q;
+          } else {
+            await api('/api/queue/item/move', { uid: item.item_uid, pos_dest: 'back' });
+            const q = [...localQueue]; q.splice(idx, 1); q.push(item); localQueue = q;
+          }
+        }
+      }
+    } catch (e) { console.error(e); }
+    refresh();
+  };
+
+  const handleDropItems = async (draggedUid: string, dIdx: number) => {
+    // If drag started from a selected item and multiple are selected, move all selected
+    const isMultiMove = selectedUids.has(draggedUid) && selectedUids.size > 1;
+    const itemsToMove: QueueItem[] = isMultiMove
+      ? queue.filter(i => selectedUids.has(i.item_uid))
+      : queue.filter(i => i.item_uid === draggedUid);
+
+    if (itemsToMove.length === 0) return;
+
+    // No-movement guard for single item
+    if (!isMultiMove) {
+      const srcIndex = queue.findIndex(i => i.item_uid === draggedUid);
+      if (srcIndex < 0 || dIdx === srcIndex || dIdx === srcIndex + 1) return;
+    }
+
+    const moveSet = new Set(itemsToMove.map(i => i.item_uid));
+
+    // Find the anchor: first non-moved item at or after dIdx
+    let beforeUid: string | null = null;
+    let useFront = false;
+    let useBack = false;
+    if (dIdx === 0) {
+      useFront = true;
+    } else if (dIdx >= queue.length) {
+      useBack = true;
+    } else {
+      for (let i = dIdx; i < queue.length; i++) {
+        if (!moveSet.has(queue[i].item_uid)) { beforeUid = queue[i].item_uid; break; }
+      }
+      if (!beforeUid) useBack = true;
+    }
+
+    try {
+      // Move in reverse order so items land in their original relative order at the target
+      const reversed = [...itemsToMove].reverse();
+      for (let i = 0; i < reversed.length; i++) {
+        const item = reversed[i];
+        if (i === 0) {
+          if (useFront) await api('/api/queue/item/move', { uid: item.item_uid, pos_dest: 'front' });
+          else if (useBack) await api('/api/queue/item/move', { uid: item.item_uid, pos_dest: 'back' });
+          else await api('/api/queue/item/move', { uid: item.item_uid, before_uid: beforeUid! });
+        } else {
+          // Each subsequent item goes before the one we just placed
+          await api('/api/queue/item/move', { uid: item.item_uid, before_uid: reversed[i - 1].item_uid });
+        }
+      }
       refresh();
     } catch (e) { console.error(e); }
   };
@@ -485,7 +797,17 @@ setReRuns(runs ?? null);
           <div className="flex-none px-3 py-4 bg-white border-b border-gray-200 flex items-center gap-2">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex-1">
               Queue · {queue.length + (runningItem ? 1 : 0)}
+              {selectedUids.size > 0 && <span className="ml-1.5 text-sky-500 normal-case font-normal">({selectedUids.size} selected)</span>}
             </span>
+            {selectedUids.size > 0 && (
+              <>
+                <button onClick={() => handleMoveSelected('top')} title="Move to top" className="text-xs px-1.5 py-0.5 rounded bg-gray-100 hover:bg-sky-100 hover:text-sky-700 text-gray-600 font-bold transition-colors">⇈</button>
+                <button onClick={() => handleMoveSelected('up')} title="Move up" className="text-xs px-1.5 py-0.5 rounded bg-gray-100 hover:bg-sky-100 hover:text-sky-700 text-gray-600 font-bold transition-colors">↑</button>
+                <button onClick={() => handleMoveSelected('down')} title="Move down" className="text-xs px-1.5 py-0.5 rounded bg-gray-100 hover:bg-sky-100 hover:text-sky-700 text-gray-600 font-bold transition-colors">↓</button>
+                <button onClick={() => handleMoveSelected('bottom')} title="Move to bottom" className="text-xs px-1.5 py-0.5 rounded bg-gray-100 hover:bg-sky-100 hover:text-sky-700 text-gray-600 font-bold transition-colors">⇊</button>
+                <div className="w-px h-4 bg-gray-300 mx-1" />
+              </>
+            )}
             <button
               onClick={handleToggleAutostart}
               title={status?.queue_autostart_enabled ? 'Auto-start enabled — click to disable' : 'Auto-start disabled — click to enable'}
@@ -520,20 +842,100 @@ setReRuns(runs ?? null);
               }`}
               title={status?.queue_stop_pending ? 'Stop pending — click to cancel' : 'Stop queue after current plan'}
             >{status?.queue_stop_pending ? 'Cancel Stop' : 'Stop'}</button>
+            <div className="w-px h-4 bg-gray-300 mx-1" />
+            <button
+              onClick={handleClearQueue}
+              className="text-xs px-2 py-0.5 rounded bg-gray-100 hover:bg-red-100 hover:text-red-600 text-gray-600 font-medium transition-colors"
+              title="Clear all items from the queue"
+            >Clear</button>
           </div>
 
-          <div className="overflow-y-auto p-2 space-y-1.5 min-h-0" style={{ height: queueHeight }}>
+          <div
+            className="overflow-y-auto p-2 min-h-0 flex flex-col gap-1.5"
+            style={{ height: queueHeight }}
+            onDragOver={e => e.preventDefault()}
+            onDragLeave={e => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                setDropIndex(null); dropIndexRef.current = null;
+              }
+            }}
+            onDrop={e => {
+              // Fallback: fires when dropping on the catchall area (not on a card)
+              e.preventDefault();
+              const uid = dragUidRef.current;
+              const dIdx = dropIndexRef.current;
+              setDragUid(null); dragUidRef.current = null;
+              setDropIndex(null); dropIndexRef.current = null;
+              if (uid !== null && dIdx !== null) handleDropItems(uid, dIdx);
+            }}
+          >
             {runningItem && (
               <QueueCard item={runningItem} running key={runningItem.item_uid} onDelete={() => {}} />
             )}
-            {queue.map(item => (
-              <QueueCard
+            {queue.map((item, idx) => (
+              <div
                 key={item.item_uid}
-                item={item}
-                running={false}
-                onDelete={() => handleDelete(item.item_uid)}
-              />
+                className="flex flex-col gap-0"
+                onDrop={e => {
+                  e.preventDefault();
+                  e.stopPropagation(); // prevent container's onDrop from double-firing
+                  const uid = dragUidRef.current;
+                  const dIdx = dropIndexRef.current;
+                  setDragUid(null); dragUidRef.current = null;
+                  setDropIndex(null); dropIndexRef.current = null;
+                  if (uid !== null && dIdx !== null) handleDropItems(uid, dIdx);
+                }}
+              >
+                {/* Drop indicator above this card */}
+                <div
+                  className={`h-0.5 rounded transition-colors mb-0.5 ${dragUid && dropIndex === idx ? 'bg-sky-400' : 'bg-transparent'}`}
+                  onDragOver={e => {
+                    e.preventDefault(); e.stopPropagation();
+                    setDropIndex(idx); dropIndexRef.current = idx;
+                  }}
+                />
+                <QueueCard
+                  item={item}
+                  running={false}
+                  selected={selectedUids.has(item.item_uid)}
+                  onSelect={e => handleSelect(item.item_uid, e)}
+                  onDelete={() => handleDelete(item.item_uid)}
+                  onEdit={() => handleEditItem(item)}
+                  onDuplicate={() => handleDuplicate(item)}
+                  dragging={dragUid !== null && (dragUid === item.item_uid || (selectedUids.has(dragUid) && selectedUids.has(item.item_uid)))}
+                  onDragStart={e => {
+                    e.dataTransfer.effectAllowed = 'move';
+                    setDragUid(item.item_uid); dragUidRef.current = item.item_uid;
+                  }}
+                  onDragEnd={() => {
+                    setDragUid(null); dragUidRef.current = null;
+                    setDropIndex(null); dropIndexRef.current = null;
+                  }}
+                  onDragOver={e => {
+                    e.preventDefault(); e.stopPropagation();
+                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                    const dIdx = e.clientY < rect.top + rect.height / 2 ? idx : idx + 1;
+                    setDropIndex(dIdx); dropIndexRef.current = dIdx;
+                  }}
+                />
+              </div>
             ))}
+            {/* Drop indicator at end */}
+            <div
+              className={`h-0.5 rounded transition-colors ${dragUid && dropIndex === queue.length ? 'bg-sky-400' : 'bg-transparent'}`}
+              onDragOver={e => {
+                e.preventDefault(); e.stopPropagation();
+                setDropIndex(queue.length); dropIndexRef.current = queue.length;
+              }}
+            />
+            {/* Catchall drop zone */}
+            <div
+              className="flex-1 min-h-8"
+              onDragOver={e => {
+                e.preventDefault();
+                setDropIndex(queue.length); dropIndexRef.current = queue.length;
+              }}
+            />
             {queue.length === 0 && !runningItem && (
               <p className="text-xs text-gray-400 text-center py-4">Queue is empty</p>
             )}
@@ -591,14 +993,25 @@ setReRuns(runs ?? null);
           </div>
 
           {/* History */}
-          <div className="flex-none px-3 py-4 bg-white border-b border-gray-200">
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+          <div className="flex-none px-3 py-4 bg-white border-b border-gray-200 flex items-center gap-2">
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex-1">
               History · {history.length}
             </span>
+            <button
+              onClick={handleSaveHistory}
+              disabled={history.length === 0}
+              className="text-xs px-2 py-0.5 rounded bg-gray-100 hover:bg-sky-100 hover:text-sky-600 text-gray-600 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Save history as CSV"
+            >Save</button>
+            <button
+              onClick={handleClearHistory}
+              className="text-xs px-2 py-0.5 rounded bg-gray-100 hover:bg-red-100 hover:text-red-600 text-gray-600 font-medium transition-colors"
+              title="Clear all history"
+            >Clear</button>
           </div>
           <div className="flex-1 overflow-y-auto p-2 space-y-1.5 min-h-0">
             {history.map(item => (
-              <HistoryCard key={item.item_uid} item={item} />
+              <HistoryCard key={item.item_uid} item={item} onCopyToQueue={() => handleCopyToQueue(item)} />
             ))}
             {history.length === 0 && (
               <p className="text-xs text-gray-400 text-center py-4">No history</p>
@@ -688,18 +1101,39 @@ setReRuns(runs ?? null);
               </p>
             ) : (
               <div className="flex flex-col gap-3">
-                {/* Plan selector */}
+                {/* Edit mode banner */}
+                {editingItem && (
+                  <div className="flex items-center gap-2 px-1 py-1 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700">
+                    <span className="flex-1">Editing item <span className="font-mono font-semibold">{editingItem.item_uid.slice(0, 8)}…</span></span>
+                    <button onClick={() => { setEditingItem(null); setSubmitMsg(''); setSubmitError(''); }} className="text-amber-500 hover:text-amber-700 font-medium">Cancel</button>
+                  </div>
+                )}
+                {/* Plan selector + action button */}
                 <div className="flex items-center gap-3">
                   <label className="text-xs text-gray-500 w-20 shrink-0 text-right">Plan</label>
                   <select
                     value={selectedPlan}
                     onChange={e => setSelectedPlan(e.target.value)}
-                    className="flex-1 text-sm border border-gray-200 rounded px-2 py-1 bg-white focus:outline-none focus:border-sky-400"
+                    disabled={!!editingItem}
+                    className="flex-1 text-sm border border-gray-200 rounded px-2 py-1 bg-white focus:outline-none focus:border-sky-400 disabled:bg-gray-50 disabled:text-gray-400"
                   >
                     {allowedPlans.map(p => (
                       <option key={p.name} value={p.name}>{p.name}</option>
                     ))}
                   </select>
+                  {editingItem ? (
+                    <button
+                      onClick={handleUpdateQueue}
+                      className="text-sm bg-amber-500 hover:bg-amber-400 text-white px-4 py-1 rounded font-medium transition-colors shrink-0"
+                    >Update</button>
+                  ) : (
+                    <button
+                      onClick={handleAddToQueue}
+                      className="text-sm bg-sky-600 hover:bg-sky-500 text-white px-4 py-1 rounded font-medium transition-colors shrink-0"
+                    >Add to Queue</button>
+                  )}
+                  {submitMsg && <span className="text-xs text-green-600 shrink-0">{submitMsg}</span>}
+                  {submitError && <span className="text-xs text-red-500 shrink-0">{submitError}</span>}
                 </div>
 
                 {/* Plan description */}
@@ -736,20 +1170,6 @@ setReRuns(runs ?? null);
                     </div>
                   );
                 })}
-
-                {/* Actions */}
-                <div className="flex items-center gap-2 pl-[5.5rem]">
-                  <button
-                    onClick={handleAddToQueue}
-                    className="text-sm bg-sky-600 hover:bg-sky-500 text-white px-4 py-1 rounded font-medium transition-colors"
-                  >Add to Queue</button>
-                  <button
-                    onClick={handleExecute}
-                    className="text-sm border border-sky-400 text-sky-700 hover:bg-sky-50 px-4 py-1 rounded font-medium transition-colors"
-                  >Execute Now</button>
-                  {submitMsg && <span className="text-xs text-green-600">{submitMsg}</span>}
-                  {submitError && <span className="text-xs text-red-500">{submitError}</span>}
-                </div>
               </div>
             )}
           </div>
@@ -765,7 +1185,10 @@ setReRuns(runs ?? null);
           {/* Console */}
           <div className="flex-1 flex flex-col overflow-hidden bg-gray-900">
             <div className="flex-none flex items-center gap-3 px-3 py-4 bg-gray-800 border-b border-gray-700">
-              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide flex-1">Console Output</span>
+              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide flex-1">
+                Console Output
+                {consoleError && <span className="ml-2 font-normal normal-case text-red-400">— {consoleError}</span>}
+              </span>
               <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
                 wsStatus === 'open' ? 'bg-green-800 text-green-300' :
                 wsStatus === 'connecting' ? 'bg-amber-800 text-amber-300' :
@@ -773,14 +1196,7 @@ setReRuns(runs ?? null);
                 'bg-gray-700 text-gray-400'
               }`}>{wsStatus}</span>
               <button
-                onClick={async () => {
-                  // Advance the offset to the current buffer end so old content won't reappear
-                  try {
-                    const r = await fetch(`${proxyUrl}/api/console_output`, { cache: 'no-store' });
-                    if (r.ok) { const d = await r.json(); consoleTextOffsetRef.current = (d.text ?? '').length; }
-                  } catch { /* ignore */ }
-                  setConsoleLines([]);
-                }}
+                onClick={() => { clearedTextRef.current = lastTextRef.current; setConsoleLines([]); }}
                 className="text-xs text-gray-500 hover:text-gray-300"
               >Clear</button>
               <label className="flex items-center gap-1.5 cursor-pointer select-none">
