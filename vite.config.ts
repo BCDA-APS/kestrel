@@ -110,13 +110,25 @@ function qserverProxyPlugin(): Plugin {
           const proxyReq = transport.request(
             { hostname, port, path, method: req.method, headers: { ...proxyReqHeaders, 'content-length': body.length } },
             (proxyRes) => {
-              // Always pipe directly — qserver proxy does no URL rewriting,
-              // and piping handles both regular JSON and streaming responses.
               const headers = { ...proxyRes.headers };
               headers['access-control-allow-origin'] = '*';
+              // Node.js decodes chunked/compressed data from the upstream, so
+              // forwarding these headers would mislead the browser about the
+              // encoding of what it actually receives.
               delete headers['content-encoding'];
+              delete headers['transfer-encoding'];
+              delete headers['content-length'];
               res.writeHead(proxyRes.statusCode ?? 200, headers);
-              proxyRes.pipe(res);
+              // Flush headers immediately so the browser's fetch() resolves
+              // without waiting for the first body chunk (streaming endpoints
+              // may not send data until a scan starts).
+              res.flushHeaders();
+              // Disable Nagle's algorithm so each NDJSON line is forwarded
+              // immediately rather than batched by TCP.
+              res.socket?.setNoDelay(true);
+              proxyRes.on('data', (chunk: Buffer) => res.write(chunk));
+              proxyRes.on('end', () => res.end());
+              proxyRes.on('error', (err: Error) => res.destroy(err));
               req.on('close', () => proxyReq.destroy());
             }
           );
@@ -128,6 +140,82 @@ function qserverProxyPlugin(): Plugin {
   };
 }
 
+// Dedicated SSE proxy for /api/stream_console_output.
+// Converts the upstream NDJSON stream to text/event-stream so that Safari
+// (and all other browsers) deliver events incrementally via EventSource.
+function qserverSSEPlugin(): Plugin {
+  return {
+    name: 'qserver-sse',
+    configureServer(server) {
+      server.middlewares.use('/qs-stream', (req, res) => {
+        const url = req.url ?? '/';
+        const match = url.match(/^\/?([^/]+)\/([^/]+)(\/.*)?$/);
+        if (!match) {
+          res.writeHead(400);
+          res.end('Bad URL — expected /qs-stream/<protocol>/<host:port>/...');
+          return;
+        }
+
+        const protocol = match[1];
+        const host = match[2];
+        // Strip ?api_key=... from the path before forwarding
+        const rawPath = match[3] ?? '/';
+        const [pathOnly, queryStr] = rawPath.split('?');
+        const params = new URLSearchParams(queryStr ?? '');
+        const apiKey = params.get('api_key') ?? '';
+
+        const [hostname, portStr] = host.split(':');
+        const port = portStr ? parseInt(portStr) : (protocol === 'https' ? 443 : 80);
+        const transport = protocol === 'https' ? https : http;
+
+        const upstreamHeaders: Record<string, string> = { host };
+        if (apiKey) upstreamHeaders['Authorization'] = `ApiKey ${apiKey}`;
+
+        // Send SSE headers immediately — this is what tells browsers to deliver
+        // each event as it arrives rather than buffering the whole response.
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'Access-Control-Allow-Origin': '*',
+        });
+        res.flushHeaders();
+        res.socket?.setNoDelay(true);
+        // Initial SSE comment — fires EventSource onopen in the browser.
+        res.write(': connected\n\n');
+
+        const proxyReq = transport.request(
+          { hostname, port, path: pathOnly, method: 'GET', headers: upstreamHeaders },
+          (proxyRes) => {
+            let buf = '';
+            proxyRes.on('data', (chunk: Buffer) => {
+              buf += chunk.toString('utf-8');
+              // First pass: emit any newline-terminated NDJSON lines
+              const parts = buf.split('\n');
+              buf = parts.pop() ?? '';
+              for (const part of parts) {
+                if (part.trim()) res.write(`data: ${part.trim()}\n\n`);
+              }
+              // Second pass: if the remainder is a complete JSON object
+              // (server sends one object per chunk with no trailing newline),
+              // emit and clear the buffer.
+              const trimmed = buf.trim();
+              if (trimmed.startsWith('{')) {
+                try { JSON.parse(trimmed); res.write(`data: ${trimmed}\n\n`); buf = ''; } catch { /* incomplete */ }
+              }
+            });
+            proxyRes.on('end', () => res.end());
+            proxyRes.on('error', () => res.end());
+          }
+        );
+        proxyReq.on('error', (err) => { console.error('[qs-stream] error:', err.message); res.end(); });
+        req.on('close', () => proxyReq.destroy());
+        proxyReq.end();
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tiledProxyPlugin(), qserverProxyPlugin()],
+  plugins: [react(), tiledProxyPlugin(), qserverProxyPlugin(), qserverSSEPlugin()],
 });

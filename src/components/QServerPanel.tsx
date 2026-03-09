@@ -254,12 +254,6 @@ export default function QServerPanel({ proxyUrl, serverUrl, onStatusChange }: {
   const [wsStatus, setWsStatus] = useState<'connecting' | 'open' | 'closed' | 'error'>('connecting');
   const [consoleError, setConsoleError] = useState<string>('');
   const consoleEndRef = useRef<HTMLDivElement>(null);
-  // Full text content of the last rendered poll response.
-  const lastTextRef = useRef<string>('');
-  // Set by Clear to the text that was visible at that moment. Polls whose text
-  // matches this value are suppressed so the old content doesn't reappear.
-  // Reset to null when the server's text actually changes (new scan output).
-  const clearedTextRef = useRef<string | null>(null);
 
   const [reRuns, setReRuns] = useState<RERunsData | null>(null);
 
@@ -399,76 +393,49 @@ setReRuns(runs ?? null);
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
-  // ── Console polling (full buffer diff via /api/console_output) ──────────────
+  // ── Console streaming via EventSource (SSE) ────────────────────────────────
+  // The /qs-stream proxy converts the upstream NDJSON stream to text/event-stream
+  // so that Safari (and all browsers) deliver events incrementally.
   useEffect(() => {
     if (!consoleOn) { setWsStatus('closed'); return; }
     setWsStatus('connecting');
-    let running = true;
-    let consecutiveErrors = 0;
 
-    const poll = async () => {
-      if (!running) return;
+    // eslint-disable-next-line no-control-regex
+    const stripAnsi = (s: string) => s
+      .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+      .replace(/\x1b[@-Z\\-_]/g, '')
+      .replace(/\x1b\[[\x20-\x3f]*[\x40-\x7e]/g, '');
+
+    const apiKey = localStorage.getItem('qsApiKey') ?? '';
+    // proxyUrl = 'http://localhost:5173/qs-proxy/http/host:port'
+    // sseBase  = 'http://localhost:5173/qs-stream/http/host:port'
+    const sseBase = proxyUrl.replace('/qs-proxy/', '/qs-stream/');
+    const sseUrl = `${sseBase}/api/stream_console_output`;
+    const url = apiKey ? `${sseUrl}?api_key=${encodeURIComponent(apiKey)}` : sseUrl;
+
+    const es = new EventSource(url);
+
+    es.onopen = () => { setWsStatus('open'); setConsoleError(''); };
+    es.onerror = () => { setWsStatus('connecting'); };
+
+    es.onmessage = (e: MessageEvent) => {
       try {
-        const apiKey = localStorage.getItem('qsApiKey') ?? '';
-        const headers: Record<string, string> = {};
-        if (apiKey) headers['Authorization'] = `ApiKey ${apiKey}`;
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 10000);
-        let r: Response;
-        try {
-          r = await fetch(`${proxyUrl}/api/console_output`, { signal: controller.signal, cache: 'no-store', headers });
-          clearTimeout(timeout);
-        } catch (e) {
-          clearTimeout(timeout);
-          throw e;
+        const data = JSON.parse(e.data);
+        const msg: string = data.msg ?? '';
+        if (!msg) return;
+        const cleaned = stripAnsi(msg.replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
+        const newLines: string[] = [];
+        for (const l of cleaned.split('\n')) {
+          const trimmed = l.trimEnd();
+          if (trimmed) newLines.push(trimmed);
         }
-        if (!r.ok) {
-          if (r.status === 401) {
-            setWsStatus('closed');
-            setConsoleError('HTTP 401 — server requires read:console permission scope');
-            setConsoleLines(['Console unavailable: server requires read:console scope.',
-              'See docs/qserver-setup.md for the permissions config.']);
-            if (running) setTimeout(poll, 5000);
-            return;
-          }
-          throw new Error(`HTTP ${r.status}`);
+        if (newLines.length > 0) {
+          setConsoleLines(prev => [...prev, ...newLines].slice(-500));
         }
-        const data = await r.json();
-        if (!running) return;
-        const rawText: string = data.text ?? '';
-        const text = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-        lastTextRef.current = text;
-        // After Clear, suppress until the server's text actually changes.
-        if (clearedTextRef.current !== null && text === clearedTextRef.current) {
-          // Same content as at clear time — stay empty, wait for new output.
-        } else {
-          clearedTextRef.current = null;  // lift suppression once content changes
-          // eslint-disable-next-line no-control-regex
-          const stripAnsi = (s: string) => s
-            .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '') // OSC sequences
-            .replace(/\x1b[@-Z\\-_]/g, '')                       // 2-char ESC sequences
-            .replace(/\x1b\[[\x20-\x3f]*[\x40-\x7e]/g, '');     // CSI sequences
-          const lines = text.split('\n')
-            .map(l => stripAnsi(l).trimEnd())
-            .filter(l => l.length > 0)
-            .slice(-500);
-          if (lines.length > 0) setConsoleLines(lines);
-        }
-        consecutiveErrors = 0;
-        setConsoleError('');
-        setWsStatus('open');
-      } catch (e) {
-        if (!running) return;
-        consecutiveErrors++;
-        const msg = e instanceof Error ? e.message : String(e);
-        if (consecutiveErrors === 1) console.error('[QServer console] poll error:', e);
-        if (consecutiveErrors >= 3) { setWsStatus('error'); setConsoleError(msg); }
-      }
-      if (running) setTimeout(poll, 1000);
+      } catch { /* ignore malformed messages */ }
     };
 
-    poll();
-    return () => { running = false; };
+    return () => { es.close(); };
   }, [proxyUrl, consoleOn]);
 
   useEffect(() => {
@@ -1196,7 +1163,7 @@ setReRuns(runs ?? null);
                 'bg-gray-700 text-gray-400'
               }`}>{wsStatus}</span>
               <button
-                onClick={() => { clearedTextRef.current = lastTextRef.current; setConsoleLines([]); }}
+                onClick={() => setConsoleLines([])}
                 className="text-xs text-gray-500 hover:text-gray-300"
               >Clear</button>
               <label className="flex items-center gap-1.5 cursor-pointer select-none">
