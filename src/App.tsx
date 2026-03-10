@@ -36,22 +36,26 @@ function computeDerivative(xs: number[], ys: number[], w: number): { x: number[]
 const _parseArrayFields = (json: any): string[] =>
   (json.data ?? []).filter((i: any) => i.attributes?.structure_family === 'array').map((i: any) => i.id);
 
+// Returns '/<catalog>' for named catalogs, '' for root (flat servers)
+const catSeg = (catalog: string | null) => catalog ? `/${catalog}` : '';
+
 async function fetchRunTraces(
   serverUrl: string, catalog: string, runId: string, runLabel: string,
   detectors: string[], motors: string[],
   preferX: string, preferYs: string[],
 ): Promise<XYTrace[]> {
   const matchesDev = (name: string, devs: string[]) => devs.some(d => name === d || name.startsWith(d + '_'));
+  const cs = catSeg(catalog);
 
   // 1. Streams
-  const sj = await fetch(`${serverUrl}/api/v1/search/${catalog}/${runId}?page[limit]=50`).then(r => r.json());
+  const sj = await fetch(`${serverUrl}/api/v1/search${cs}/${runId}?page[limit]=50`).then(r => r.json());
   const streams: string[] = (sj.data ?? []).map((i: any) => i.id); // eslint-disable-line @typescript-eslint/no-explicit-any
   const stream = streams.includes('primary') ? 'primary' : (streams[0] ?? '');
   if (!stream) throw new Error('no streams');
 
   // 2. Fields — handle array / table / sub-node layouts
   let subNode = '', family: 'array' | 'table' = 'array', fieldNames: string[] = [];
-  const fj = await fetch(`${serverUrl}/api/v1/search/${catalog}/${runId}/${stream}?page[limit]=200`).then(r => r.json());
+  const fj = await fetch(`${serverUrl}/api/v1/search${cs}/${runId}/${stream}?page[limit]=200`).then(r => r.json());
   const arrays = _parseArrayFields(fj);
   if (arrays.length > 0) {
     fieldNames = arrays;
@@ -64,7 +68,7 @@ async function fetchRunTraces(
     } else {
       for (const sub of ['data', 'internal']) {
         try {
-          const sj2 = await fetch(`${serverUrl}/api/v1/search/${catalog}/${runId}/${stream}/${sub}?page[limit]=200`).then(r => r.json());
+          const sj2 = await fetch(`${serverUrl}/api/v1/search${cs}/${runId}/${stream}/${sub}?page[limit]=200`).then(r => r.json());
           const fs = _parseArrayFields(sj2);
           if (fs.length > 0) { subNode = sub; fieldNames = fs; break; }
         } catch { /* continue */ }
@@ -94,7 +98,7 @@ async function fetchRunTraces(
   // 4. Fetch data
   const subPath = subNode ? `/${subNode}` : '';
   if (family === 'table') {
-    const tj = await fetch(`${serverUrl}/api/v1/table/full/${catalog}/${runId}/${stream}${subPath}?format=application/json`).then(r => r.json());
+    const tj = await fetch(`${serverUrl}/api/v1/table/full${cs}/${runId}/${stream}${subPath}?format=application/json`).then(r => r.json());
     const seqNums: number[] = tj.seq_num ?? [];
     const nRows = seqNums.length > 0 ? (seqNums.findIndex((s: number) => s === 0) === -1 ? seqNums.length : seqNums.findIndex((s: number) => s === 0)) : undefined;
     return ys.map(yf => ({
@@ -103,7 +107,7 @@ async function fetchRunTraces(
       xLabel: x, yLabel: yf, runLabel, runId,
     }));
   }
-  const base = `${serverUrl}/api/v1/array/full/${catalog}/${runId}/${stream}${subPath}`;
+  const base = `${serverUrl}/api/v1/array/full${cs}/${runId}/${stream}${subPath}`;
   const [xData, ...yDatas] = await Promise.all([
     fetch(`${base}/${x}?format=application/json`).then(r => r.json()),
     ...ys.map(yf => fetch(`${base}/${yf}?format=application/json`).then(r => r.json())),
@@ -131,7 +135,8 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(380);
   const [runsHeight, setRunsHeight] = useState(() => Math.round((window.innerHeight - 64) * 3 / 5));
   const [catalogs, setCatalogs] = useState<string[]>([]);
-  const [selectedCatalog, setSelectedCatalog] = useState('');
+  const [rootIsRuns, setRootIsRuns] = useState(false);
+  const [selectedCatalog, setSelectedCatalog] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState('');
   const [selectedRunLabel, setSelectedRunLabel] = useState('');
   const [selectedRunDetectors, setSelectedRunDetectors] = useState<string[]>([]);
@@ -266,7 +271,7 @@ export default function App() {
   const toProxyUrl = toProxyUrlStatic;
 
   const handleConnect = () => {
-    setSelectedCatalog('');
+    setSelectedCatalog(null);
     setSelectedRunId('');
     setSelectedRunLabel('');
     setServerUrl(toProxyUrl(inputUrl));
@@ -311,15 +316,28 @@ export default function App() {
     if (qsStatus?.re_state !== 'paused') setResumePending(false);
   }, [qsStatus?.re_state]);
 
-  // Fetch top-level catalog names whenever the server changes
+  // Fetch top-level items whenever the server changes.
+  // If the root items are BlueskyRuns (flat server), skip the catalog dropdown and use '' as the catalog.
   useEffect(() => {
     if (!serverUrl) return;
     setCatalogs([]);
+    setRootIsRuns(false);
+    setSelectedCatalog(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     fetch(`${serverUrl}/api/v1/search/`)
       .then((r) => r.json())
       .then((json) => {
-        const names: string[] = (json.data ?? []).map((item: { id: string }) => item.id);
-        setCatalogs(names);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const items: any[] = json.data ?? [];
+        const isFlat = items.length > 0 &&
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (items[0].attributes?.specs ?? []).some((s: any) => s.name === 'BlueskyRun');
+        if (isFlat) {
+          setRootIsRuns(true);
+          setSelectedCatalog('');
+        } else {
+          setCatalogs(items.map((i: { id: string }) => i.id));
+        }
       })
       .catch(() => {});
   }, [serverUrl]);
@@ -333,7 +351,7 @@ export default function App() {
   const livePlot = useCallback((traces: XYTrace[], title: string, stream: string, dataSubNode: string, dataNodeFamily: 'array' | 'table') => {
     setPanel({
       id: crypto.randomUUID(), type: 'xy' as const, traces, title,
-      liveConfig: { serverUrl, catalog: selectedCatalog, stream, runId: selectedRunId, dataSubNode, dataNodeFamily },
+      liveConfig: { serverUrl, catalog: selectedCatalog ?? '', stream, runId: selectedRunId, dataSubNode, dataNodeFamily },
     });
     setFitResults(null);
     setShowDerivative(false);
@@ -551,16 +569,16 @@ export default function App() {
               Connect
             </button>
 
-            {catalogs.length > 0 && (
+            {!rootIsRuns && catalogs.length > 0 && (
               <>
                 <div className="w-px h-6 bg-sky-700 mx-1" />
                 <label className="text-sky-300 text-xs font-medium">Catalog</label>
                 <select
-                  value={selectedCatalog}
+                  value={selectedCatalog ?? ''}
                   onChange={(e) => { setSelectedCatalog(e.target.value); setSelectedRunId(''); setSelectedRunLabel(''); setRunPage(0); }}
                   className="bg-sky-900 text-white text-sm px-3 py-1.5 rounded border border-sky-700 focus:outline-none focus:border-sky-400"
                 >
-                  <option value="">— root —</option>
+                  <option value="">— select —</option>
                   {catalogs.map((name) => (
                     <option key={name} value={name}>{name}</option>
                   ))}
@@ -635,7 +653,7 @@ export default function App() {
           className="flex-none bg-white overflow-hidden flex flex-col transition-none"
           style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
         >
-          {selectedCatalog ? (
+          {selectedCatalog !== null ? (
             <>
               {/* Runs panel */}
               <div
@@ -710,7 +728,7 @@ export default function App() {
             </>
           ) : (
             <div className="flex items-center justify-center h-full text-sm text-gray-400">
-              Connect to a server and select a catalog
+              Connect to a server{!rootIsRuns && ' and select a catalog'}
             </div>
           )}
         </aside>

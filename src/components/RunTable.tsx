@@ -17,7 +17,7 @@ type RunRow = {
 
 type RunTableProps = {
   serverUrl: string;
-  catalog: string;
+  catalog: string | null;
   page: number;
   selectedRunId?: string;
   autoFollow?: boolean;
@@ -208,7 +208,7 @@ export default function RunTable({ serverUrl, catalog, page, selectedRunId, auto
   // Detect filter key format by probing with a nested key (start.scan_id).
   // tiled 0.2.8+ returns OK (even 0 results); older tiled returns 500.
   useEffect(() => {
-    if (!serverUrl || !catalog) return;
+    if (!serverUrl || catalog === null) return;
     setKeyPrefix(null);
     fetch(`${serverUrl}/api/v1/search/${catalog}?page[limit]=1&filter[eq][condition][key]=start.scan_id&filter[eq][condition][value]=0`)
       .then(r => setKeyPrefix(r.ok ? 'start.' : ''))
@@ -217,7 +217,7 @@ export default function RunTable({ serverUrl, catalog, page, selectedRunId, auto
 
   // Fetch the oldest run's timestamp to set the slider minimum
   useEffect(() => {
-    if (!serverUrl || !catalog) return;
+    if (!serverUrl || catalog === null) return;
     fetch(`${serverUrl}/api/v1/search/${catalog}?page[limit]=1&page[offset]=0`)
       .then(r => r.json())
       .then(json => {
@@ -231,7 +231,7 @@ export default function RunTable({ serverUrl, catalog, page, selectedRunId, auto
 
   // Poll every 5s for new runs and status updates (silent — no loading spinner)
   useEffect(() => {
-    if (!serverUrl || !catalog) return;
+    if (!serverUrl || catalog === null) return;
     const id = setInterval(() => { bgRefreshRef.current = true; setRefreshKey(k => k + 1); }, 5000);
     return () => clearInterval(id);
   }, [serverUrl, catalog]);
@@ -241,7 +241,7 @@ export default function RunTable({ serverUrl, catalog, page, selectedRunId, auto
   useEffect(() => { onNewAcquiringRunRef.current = onNewAcquiringRun; });
 
   useEffect(() => {
-    if (!serverUrl || !catalog) return;
+    if (!serverUrl || catalog === null) return;
     let initialDone = false;
     let lastSeenId = '';
     const check = async () => {
@@ -285,7 +285,7 @@ export default function RunTable({ serverUrl, catalog, page, selectedRunId, auto
   }, [filterKey]);
 
   useEffect(() => {
-    if (!serverUrl || !catalog) { setRuns([]); setTotal(0); setLoading(false); return; }
+    if (!serverUrl || catalog === null) { setRuns([]); setTotal(0); setLoading(false); return; }
     if (keyPrefix === null) { setLoading(true); return; }
     let cancelled = false;
     const isBg = bgRefreshRef.current;

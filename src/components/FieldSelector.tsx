@@ -8,7 +8,7 @@ type FieldInfo = {
 
 type FieldSelectorProps = {
   serverUrl: string;
-  catalog: string;
+  catalog: string | null;
   runId: string;
   runLabel: string;
   runDetectors: string[];
@@ -21,6 +21,8 @@ type FieldSelectorProps = {
 };
 
 export type FieldSelectorHandle = { schedulePlot: () => void; scheduleLive: () => void; removeY: (yLabel: string) => void };
+
+const catSeg = (c: string | null) => c ? `/${c}` : '';
 
 const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(function FieldSelector({
   serverUrl, catalog, runId, runLabel,
@@ -49,10 +51,10 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
 
   // Fetch streams for this run
   useEffect(() => {
-    if (!serverUrl || !catalog || !runId) return;
+    if (!serverUrl || catalog === null || !runId) return;
     setStreams([]);
     setSelectedStream('');
-    fetch(`${serverUrl}/api/v1/search/${catalog}/${runId}?page[limit]=50`)
+    fetch(`${serverUrl}/api/v1/search${catSeg(catalog)}/${runId}?page[limit]=50`)
       .then(r => r.json())
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .then(json => {
@@ -80,7 +82,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     const fetchUrl = (url: string) =>
       fetch(url).then(r => r.ok ? r.json() : Promise.reject(new Error('http')));
 
-    const streamUrl = `${serverUrl}/api/v1/search/${catalog}/${runId}/${selectedStream}?page[limit]=200`;
+    const streamUrl = `${serverUrl}/api/v1/search${catSeg(catalog)}/${runId}/${selectedStream}?page[limit]=200`;
 
     fetchUrl(streamUrl)
       .then(json => {
@@ -100,7 +102,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
         }
         // Try sub-nodes as array containers (older MongoDB adapter)
         const trySubNode = (sub: string) =>
-          fetchUrl(`${serverUrl}/api/v1/search/${catalog}/${runId}/${selectedStream}/${sub}?page[limit]=200`)
+          fetchUrl(`${serverUrl}/api/v1/search${catSeg(catalog)}/${runId}/${selectedStream}/${sub}?page[limit]=200`)
             .then(j => { const fs = parseArrayItems(j); if (fs.length === 0) throw new Error('empty'); return { fs, sub }; });
 
         return trySubNode('data')
@@ -184,7 +186,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   const fetchAllTraces = async (x: string, ys: string[]): Promise<XYTrace[]> => {
     const subPath = dataSubNode ? `/${dataSubNode}` : '';
     if (dataNodeFamily === 'table') {
-      const resp = await fetch(`${serverUrl}/api/v1/table/full/${catalog}/${runId}/${selectedStream}${subPath}?format=application/json`);
+      const resp = await fetch(`${serverUrl}/api/v1/table/full${catSeg(catalog)}/${runId}/${selectedStream}${subPath}?format=application/json`);
       if (!resp.ok) throw new Error('Fetch failed');
       const table = await resp.json();
       const seqNums: number[] = table.seq_num ?? [];
@@ -195,7 +197,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
         return { x: xArr, y: yArr, xLabel: x, yLabel: yf, runLabel, runId };
       });
     }
-    const base = `${serverUrl}/api/v1/array/full/${catalog}/${runId}/${selectedStream}${subPath}`;
+    const base = `${serverUrl}/api/v1/array/full${catSeg(catalog)}/${runId}/${selectedStream}${subPath}`;
     const yResps = await Promise.all(ys.map(yf => fetch(`${base}/${yf}?format=application/json`)));
     if (yResps.some(r => !r.ok)) throw new Error('Fetch failed');
     const yDatas: number[][] = await Promise.all(yResps.map(r => r.json()));
@@ -230,7 +232,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   useEffect(() => {
     if (pendingAction !== 'live' || selectedStream === 'primary') return;
     const poll = () =>
-      fetch(`${serverUrl}/api/v1/search/${catalog}/${runId}?page[limit]=50`)
+      fetch(`${serverUrl}/api/v1/search${catSeg(catalog)}/${runId}?page[limit]=50`)
         .then(r => r.json())
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .then(json => {
@@ -285,7 +287,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     let cancelled = false;
     const fetchCount = async () => {
       try {
-        const resp = await fetch(`${serverUrl}/api/v1/table/full/${catalog}/${runId}/${selectedStream}${subPath}?format=application/json`);
+        const resp = await fetch(`${serverUrl}/api/v1/table/full${catSeg(catalog)}/${runId}/${selectedStream}${subPath}?format=application/json`);
         if (!resp.ok || cancelled) return;
         const table = await resp.json();
         const seqNums: number[] = table.seq_num ?? [];

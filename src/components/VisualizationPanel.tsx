@@ -138,6 +138,7 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
   useEffect(() => {
     if (!liveConfig) return;
     const { serverUrl, catalog, stream, runId, dataSubNode, dataNodeFamily } = liveConfig;
+    const cs = catalog ? `/${catalog}` : '';
     let cancelled = false;
     let busy = false;
 
@@ -145,7 +146,7 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
       if (cancelled || busy) return;
       busy = true;
       try {
-        const metaResp = await fetch(`${serverUrl}/api/v1/metadata/${catalog}/${runId}`);
+        const metaResp = await fetch(`${serverUrl}/api/v1/metadata${cs}/${runId}`);
         if (cancelled || !metaResp.ok) return;
         const meta = await metaResp.json();
         const isComplete = !!meta.data?.attributes?.metadata?.stop;
@@ -153,7 +154,7 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
         const subPath = dataSubNode ? `/${dataSubNode}` : '';
         let updated: typeof panel.traces;
         if (dataNodeFamily === 'table') {
-          const resp = await fetch(`${serverUrl}/api/v1/table/full/${catalog}/${runId}/${stream}${subPath}?format=application/json`);
+          const resp = await fetch(`${serverUrl}/api/v1/table/full${cs}/${runId}/${stream}${subPath}?format=application/json`);
           if (!resp.ok) return;
           const table = await resp.json();
           const seqNums: number[] = table.seq_num ?? [];
@@ -164,7 +165,7 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
             return { ...trace, x, y };
           });
         } else {
-          const base = `${serverUrl}/api/v1/array/full/${catalog}/${runId}/${stream}${subPath}`;
+          const base = `${serverUrl}/api/v1/array/full${cs}/${runId}/${stream}${subPath}`;
           updated = await Promise.all(panel.traces.map(async (trace) => {
             const yr = await fetch(`${base}/${trace.yLabel}?format=application/json`);
             if (!yr.ok) return trace;

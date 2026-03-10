@@ -2,14 +2,17 @@ import { useState, useEffect } from 'react';
 
 type Props = {
   serverUrl: string;
-  catalog: string;
+  catalog: string | null;
   runId: string;
 };
 
+const catSeg = (c: string | null) => c ? `/${c}` : '';
+
 // Probe a stream to find the correct table URL, mirroring FieldSelector logic.
 // Returns the full table URL or null if no tabular data found.
-async function resolveTableUrl(serverUrl: string, catalog: string, runId: string, stream: string): Promise<string | null> {
-  const searchUrl = `${serverUrl}/api/v1/search/${catalog}/${runId}/${stream}?page[limit]=200`;
+async function resolveTableUrl(serverUrl: string, catalog: string | null, runId: string, stream: string): Promise<string | null> {
+  const cs = catSeg(catalog);
+  const searchUrl = `${serverUrl}/api/v1/search${cs}/${runId}/${stream}?page[limit]=200`;
   const r = await fetch(searchUrl);
   if (!r.ok) return null;
   const json = await r.json();
@@ -20,24 +23,24 @@ async function resolveTableUrl(serverUrl: string, catalog: string, runId: string
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tableItem = items.find((item: any) => item.attributes?.structure_family === 'table');
   if (tableItem) {
-    return `${serverUrl}/api/v1/table/full/${catalog}/${runId}/${stream}/${tableItem.id}?format=application/json`;
+    return `${serverUrl}/api/v1/table/full${cs}/${runId}/${stream}/${tableItem.id}?format=application/json`;
   }
 
   // Case 2: arrays directly under stream — try fetching stream as a table
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const hasArrays = items.some((item: any) => item.attributes?.structure_family === 'array');
   if (hasArrays) {
-    return `${serverUrl}/api/v1/table/full/${catalog}/${runId}/${stream}?format=application/json`;
+    return `${serverUrl}/api/v1/table/full${cs}/${runId}/${stream}?format=application/json`;
   }
 
   // Case 3: sub-nodes (MongoDB adapter: primary/data or primary/internal)
   for (const sub of ['data', 'internal']) {
-    const subR = await fetch(`${serverUrl}/api/v1/search/${catalog}/${runId}/${stream}/${sub}?page[limit]=10`);
+    const subR = await fetch(`${serverUrl}/api/v1/search${cs}/${runId}/${stream}/${sub}?page[limit]=10`);
     if (subR.ok) {
       const subJson = await subR.json();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if ((subJson.data ?? []).some((item: any) => item.attributes?.structure_family === 'array')) {
-        return `${serverUrl}/api/v1/table/full/${catalog}/${runId}/${stream}/${sub}?format=application/json`;
+        return `${serverUrl}/api/v1/table/full${cs}/${runId}/${stream}/${sub}?format=application/json`;
       }
     }
   }
@@ -54,8 +57,8 @@ export default function RunDataTab({ serverUrl, catalog, runId }: Props) {
 
   // Fetch available streams for the run
   useEffect(() => {
-    if (!serverUrl || !catalog || !runId) { setStreams([]); setActiveStream(''); return; }
-    fetch(`${serverUrl}/api/v1/search/${catalog}/${runId}?page[limit]=50`)
+    if (!serverUrl || catalog === null || !runId) { setStreams([]); setActiveStream(''); return; }
+    fetch(`${serverUrl}/api/v1/search${catSeg(catalog)}/${runId}?page[limit]=50`)
       .then(r => r.json())
       .then(j => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

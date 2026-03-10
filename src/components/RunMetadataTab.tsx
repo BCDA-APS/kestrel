@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 
 type Props = {
   serverUrl: string;
-  catalog: string;
+  catalog: string | null;
   runId: string;
 };
+
+const catSeg = (c: string | null) => c ? `/${c}` : '';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function MetaValue({ value, depth = 0 }: { value: any; depth?: number }) {
@@ -108,10 +110,10 @@ export default function RunMetadataTab({ serverUrl, catalog, runId }: Props) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!serverUrl || !catalog || !runId) { setMeta(null); return; }
+    if (!serverUrl || catalog === null || !runId) { setMeta(null); return; }
     setLoading(true);
     setMeta(null);
-    fetch(`${serverUrl}/api/v1/metadata/${catalog}/${runId}`)
+    fetch(`${serverUrl}/api/v1/metadata${catSeg(catalog)}/${runId}`)
       .then(r => r.json())
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .then((j: any) => setMeta(j.data?.attributes?.metadata ?? j.data?.attributes ?? j))

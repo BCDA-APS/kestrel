@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 
 type Props = {
   serverUrl: string;
-  catalog: string;
+  catalog: string | null;
   runId: string;
 };
+
+const catSeg = (c: string | null) => c ? `/${c}` : '';
 
 type FieldDesc = {
   name: string;
@@ -95,8 +97,8 @@ function buildDescriptorMap(descriptors: any[]): Record<string, Record<string, {
 // Probe a stream to get its field list + structure from Tiled search.
 // For array adapters, nRows comes from shape[0] (the time dimension).
 // For table adapters, nRows is left as 0 (to be filled from stop.num_events).
-async function probeStreamFields(serverUrl: string, catalog: string, runId: string, stream: string): Promise<FieldDesc[]> {
-  const r = await fetch(`${serverUrl}/api/v1/search/${catalog}/${runId}/${stream}?page[limit]=200`);
+async function probeStreamFields(serverUrl: string, catalog: string | null, runId: string, stream: string): Promise<FieldDesc[]> {
+  const r = await fetch(`${serverUrl}/api/v1/search${catSeg(catalog)}/${runId}/${stream}?page[limit]=200`);
   if (!r.ok) return [];
   const json = await r.json();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -126,7 +128,7 @@ async function probeStreamFields(serverUrl: string, catalog: string, runId: stri
 
   // Sub-nodes (MongoDB: primary/data or primary/internal)
   for (const sub of ['data', 'internal']) {
-    const subR = await fetch(`${serverUrl}/api/v1/search/${catalog}/${runId}/${stream}/${sub}?page[limit]=200`);
+    const subR = await fetch(`${serverUrl}/api/v1/search${catSeg(catalog)}/${runId}/${stream}/${sub}?page[limit]=200`);
     if (!subR.ok) continue;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const subItems: any[] = (await subR.json()).data ?? [];
@@ -152,7 +154,7 @@ export default function RunSummaryTab({ serverUrl, catalog, runId }: Props) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!serverUrl || !catalog || !runId) { setMeta(null); setStreams([]); return; }
+    if (!serverUrl || catalog === null || !runId) { setMeta(null); setStreams([]); return; }
     setLoading(true);
     setMeta(null);
     setStreams([]);
@@ -160,7 +162,7 @@ export default function RunSummaryTab({ serverUrl, catalog, runId }: Props) {
     (async () => {
       try {
         // Fetch run metadata (includes start, stop, descriptors)
-        const metaR = await fetch(`${serverUrl}/api/v1/metadata/${catalog}/${runId}`);
+        const metaR = await fetch(`${serverUrl}/api/v1/metadata${catSeg(catalog)}/${runId}`);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const metaJson: any = metaR.ok ? await metaR.json() : {};
         const attrs = metaJson.data?.attributes?.metadata ?? {};
@@ -173,7 +175,7 @@ export default function RunSummaryTab({ serverUrl, catalog, runId }: Props) {
         const numEvents: Record<string, number> = attrs.stop?.num_events ?? {};
 
         // Fetch stream list
-        const streamR = await fetch(`${serverUrl}/api/v1/search/${catalog}/${runId}?page[limit]=50`);
+        const streamR = await fetch(`${serverUrl}/api/v1/search${catSeg(catalog)}/${runId}?page[limit]=50`);
         if (!streamR.ok) return;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const streamNames: string[] = ((await streamR.json()).data ?? []).map((d: any) => d.id);
