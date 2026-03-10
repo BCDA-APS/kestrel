@@ -470,9 +470,11 @@ export default function RunTable({ serverUrl, catalog, page, selectedRunId, auto
               {runs.map((run, i) => (
                 <tr
                   key={run.id || i}
+                  onMouseDown={(e) => { if (e.metaKey || e.ctrlKey) e.preventDefault(); }}
                   onClick={(e) => {
                     const label = run.scanId != null ? String(run.scanId) : '';
                     if ((e.metaKey || e.ctrlKey) && onShiftClickRun) {
+                      e.preventDefault();
                       onShiftClickRun(run.id, label, run.detectorList, run.motorList, run.acquiring);
                     } else {
                       onSelectRun(run.id, label, run.detectorList, run.motorList, run.acquiring);
