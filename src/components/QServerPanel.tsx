@@ -507,12 +507,12 @@ setReRuns(runs ?? null);
 
   const handleClearQueue = async () => {
     if (!window.confirm('Are you sure you want to clear the queue?')) return;
-    try { await api('/api/queue/clear'); refresh(); } catch (e) { console.error(e); }
+    try { await api('/api/queue/clear', {}); refresh(); } catch (e) { console.error(e); }
   };
 
   const handleClearHistory = async () => {
     if (!window.confirm('Are you sure you want to clear the history?')) return;
-    try { await api('/api/history/clear'); refresh(); } catch (e) { console.error(e); }
+    try { await api('/api/history/clear', {}); refresh(); } catch (e) { console.error(e); }
   };
 
   const handleCopyToQueue = async (item: QueueItem) => {
