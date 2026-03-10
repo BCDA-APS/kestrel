@@ -137,6 +137,7 @@ export default function App() {
   const [catalogs, setCatalogs] = useState<string[]>([]);
   const [rootIsRuns, setRootIsRuns] = useState(false);
   const [selectedCatalog, setSelectedCatalog] = useState<string | null>(null);
+  const [tiledStatus, setTiledStatus] = useState<'idle' | 'connecting' | 'ok' | 'error'>('idle');
   const [selectedRunId, setSelectedRunId] = useState('');
   const [selectedRunLabel, setSelectedRunLabel] = useState('');
   const [selectedRunDetectors, setSelectedRunDetectors] = useState<string[]>([]);
@@ -166,6 +167,8 @@ export default function App() {
   const [qsProxyUrl, setQsProxyUrl] = useState(() => toQsProxyUrl(loadQsUrl()));
   const [qsConnectionId, setQsConnectionId] = useState(0);
   const [qsStatus, setQsStatus] = useState<{ manager_state: string; re_state: string; items_in_queue: number; queue_stop_pending: boolean; worker_environment_exists: boolean } | null>(null);
+  const [qsConnectStatus, setQsConnectStatus] = useState<'idle' | 'connecting' | 'ok' | 'error'>('idle');
+  const qsConnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pausePending, setPausePending] = useState(false);
   const [resumePending, setResumePending] = useState(false);
   const [traceStyles, setTraceStyles] = useState<TraceStyle[]>([]);
@@ -274,6 +277,7 @@ export default function App() {
     setSelectedCatalog(null);
     setSelectedRunId('');
     setSelectedRunLabel('');
+    setTiledStatus('idle');
     setServerUrl(toProxyUrl(inputUrl));
   };
 
@@ -284,6 +288,11 @@ export default function App() {
     setQsProxyUrl(toQsProxyUrl(url));
     setQsStatus(null);
     setQsConnectionId(id => id + 1);
+    setQsConnectStatus('connecting');
+    if (qsConnectTimerRef.current) clearTimeout(qsConnectTimerRef.current);
+    qsConnectTimerRef.current = setTimeout(() => {
+      setQsConnectStatus(prev => prev === 'connecting' ? 'error' : prev);
+    }, 6000);
   };
 
   const handleQsEnvToggle = async () => {
@@ -316,16 +325,24 @@ export default function App() {
     if (qsStatus?.re_state !== 'paused') setResumePending(false);
   }, [qsStatus?.re_state]);
 
+  useEffect(() => {
+    if (qsStatus !== null) {
+      setQsConnectStatus('ok');
+      if (qsConnectTimerRef.current) { clearTimeout(qsConnectTimerRef.current); qsConnectTimerRef.current = null; }
+    }
+  }, [qsStatus]);
+
   // Fetch top-level items whenever the server changes.
   // If the root items are BlueskyRuns (flat server), skip the catalog dropdown and use '' as the catalog.
   useEffect(() => {
-    if (!serverUrl) return;
+    if (!serverUrl) { setTiledStatus('idle'); return; }
     setCatalogs([]);
     setRootIsRuns(false);
     setSelectedCatalog(null);
+    setTiledStatus('connecting');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     fetch(`${serverUrl}/api/v1/search/`)
-      .then((r) => r.json())
+      .then((r) => { if (!r.ok) throw new Error('http'); return r.json(); })
       .then((json) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const items: any[] = json.data ?? [];
@@ -338,8 +355,9 @@ export default function App() {
         } else {
           setCatalogs(items.map((i: { id: string }) => i.id));
         }
+        setTiledStatus('ok');
       })
-      .catch(() => {});
+      .catch(() => setTiledStatus('error'));
   }, [serverUrl]);
 
   const plot = useCallback((traces: XYTrace[], title: string) => {
@@ -569,6 +587,25 @@ export default function App() {
               Connect
             </button>
 
+            {tiledStatus === 'connecting' && (
+              <span className="flex items-center gap-1.5 text-xs text-sky-300">
+                <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
+                Connecting…
+              </span>
+            )}
+            {tiledStatus === 'ok' && (
+              <span className="flex items-center gap-1.5 text-xs text-green-400">
+                <span className="w-2 h-2 rounded-full bg-green-400" />
+                Connected
+              </span>
+            )}
+            {tiledStatus === 'error' && (
+              <span className="flex items-center gap-1.5 text-xs text-red-400">
+                <span className="w-2 h-2 rounded-full bg-red-400" />
+                Failed
+              </span>
+            )}
+
             {!rootIsRuns && catalogs.length > 0 && (
               <>
                 <div className="w-px h-6 bg-sky-700 mx-1" />
@@ -634,16 +671,33 @@ export default function App() {
               onClick={handleQsConnect}
               className="bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white text-sm px-4 py-1.5 rounded font-medium transition-colors"
             >Connect</button>
+
+            {qsConnectStatus === 'connecting' && (
+              <span className="flex items-center gap-1.5 text-xs text-sky-300">
+                <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
+                Connecting…
+              </span>
+            )}
+            {qsConnectStatus === 'ok' && (
+              <span className="flex items-center gap-1.5 text-xs text-green-400">
+                <span className="w-2 h-2 rounded-full bg-green-400" />
+                Connected
+              </span>
+            )}
+            {qsConnectStatus === 'error' && (
+              <span className="flex items-center gap-1.5 text-xs text-red-400">
+                <span className="w-2 h-2 rounded-full bg-red-400" />
+                Failed
+              </span>
+            )}
           </div>
         )}
       </header>
 
-      {/* Queue Server tab */}
-      {appTab === 'qserver' && (
-        <div className="flex-1 overflow-hidden">
-          <QServerPanel key={qsConnectionId} proxyUrl={qsProxyUrl} serverUrl={qsInputUrl.replace(/\/$/, '')} onStatusChange={setQsStatus} />
-        </div>
-      )}
+      {/* Queue Server tab — always mounted to preserve console history */}
+      <div className={`flex-1 overflow-hidden ${appTab !== 'qserver' ? 'hidden' : ''}`}>
+        <QServerPanel key={qsConnectionId} proxyUrl={qsProxyUrl} serverUrl={qsInputUrl.replace(/\/$/, '')} onStatusChange={setQsStatus} />
+      </div>
 
       {/* Visualizer body */}
       <div className={`flex flex-1 overflow-hidden ${appTab !== 'visualizer' ? 'hidden' : ''}`}>
