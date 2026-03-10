@@ -115,22 +115,47 @@ async function fetchRunTraces(
   return ys.map((yf, i) => ({ x: xData, y: yDatas[i], xLabel: x, yLabel: yf, runLabel, runId }));
 }
 
-const DEFAULT_QS_URL = 'http://nefarian.xray.aps.anl.gov:60610';
+const DEFAULT_QS_URL = 'http://localhost:60610';
 function loadQsUrl() {
-  const saved = localStorage.getItem('qsUrl') ?? DEFAULT_QS_URL;
-  return saved.startsWith('http://') || saved.startsWith('https://') ? saved : DEFAULT_QS_URL;
+  const recents = loadRecentQsServers();
+  return recents[0] ?? DEFAULT_QS_URL;
+}
+function loadRecentQsServers(): string[] {
+  try { return JSON.parse(localStorage.getItem('recentQsServers') ?? '[]'); } catch { return []; }
+}
+function saveRecentQsServer(url: string) {
+  const prev = loadRecentQsServers();
+  const next = [url, ...prev.filter(u => u !== url)].slice(0, 5);
+  localStorage.setItem('recentQsServers', JSON.stringify(next));
+  return next;
 }
 function toQsProxyUrl(url: string) {
   return url.replace(/^(https?):\/\//, `${window.location.origin}/qs-proxy/$1/`);
 }
 
+function loadRecentServers(): string[] {
+  try { return JSON.parse(localStorage.getItem('recentServers') ?? '[]'); } catch { return []; }
+}
+function saveRecentServer(url: string) {
+  const prev = loadRecentServers();
+  const next = [url, ...prev.filter(u => u !== url)].slice(0, 5);
+  localStorage.setItem('recentServers', JSON.stringify(next));
+  return next;
+}
+
 export default function App() {
-  const DEFAULT_SERVER = 'http://nefarian.xray.aps.anl.gov:8000';
+  const DEFAULT_SERVER = 'http://localhost:8000';
   const toProxyUrlStatic = (url: string) =>
     url.replace(/^(https?):\/\//, `${window.location.origin}/tiled-proxy/$1/`);
 
-  const [serverUrl, setServerUrl] = useState(() => toProxyUrlStatic(DEFAULT_SERVER));
-  const [inputUrl, setInputUrl] = useState(DEFAULT_SERVER);
+  const [recentServers, setRecentServers] = useState<string[]>(loadRecentServers);
+  const [showServerDropdown, setShowServerDropdown] = useState(false);
+  const serverComboRef = useRef<HTMLDivElement>(null);
+  const connectingUrlRef = useRef('');
+
+  const savedUrl = localStorage.getItem('recentServers') ? (loadRecentServers()[0] ?? DEFAULT_SERVER) : DEFAULT_SERVER;
+  const [serverUrl, setServerUrl] = useState(() => toProxyUrlStatic(savedUrl));
+  const [inputUrl, setInputUrl] = useState(savedUrl);
   const [panel, setPanel] = useState<Panel | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(380);
   const [runsHeight, setRunsHeight] = useState(() => Math.round((window.innerHeight - 64) * 3 / 5));
@@ -165,6 +190,10 @@ export default function App() {
   const [qsInputUrl, setQsInputUrl] = useState(loadQsUrl);
   const [qsInputApiKey, setQsInputApiKey] = useState(() => localStorage.getItem('qsApiKey') ?? '');
   const [qsProxyUrl, setQsProxyUrl] = useState(() => toQsProxyUrl(loadQsUrl()));
+  const [recentQsServers, setRecentQsServers] = useState<string[]>(loadRecentQsServers);
+  const [showQsDropdown, setShowQsDropdown] = useState(false);
+  const qsComboRef = useRef<HTMLDivElement>(null);
+  const qsConnectingUrlRef = useRef('');
   const [qsConnectionId, setQsConnectionId] = useState(0);
   const [qsStatus, setQsStatus] = useState<{ manager_state: string; re_state: string; items_in_queue: number; queue_stop_pending: boolean; worker_environment_exists: boolean } | null>(null);
   const [qsConnectStatus, setQsConnectStatus] = useState<'idle' | 'connecting' | 'ok' | 'error'>('idle');
@@ -278,17 +307,20 @@ export default function App() {
     setSelectedRunId('');
     setSelectedRunLabel('');
     setTiledStatus('idle');
+    setShowServerDropdown(false);
+    connectingUrlRef.current = inputUrl;
     setServerUrl(toProxyUrl(inputUrl));
   };
 
   const handleQsConnect = () => {
     const url = qsInputUrl.replace(/\/$/, '');
-    localStorage.setItem('qsUrl', url);
     localStorage.setItem('qsApiKey', qsInputApiKey);
     setQsProxyUrl(toQsProxyUrl(url));
     setQsStatus(null);
     setQsConnectionId(id => id + 1);
     setQsConnectStatus('connecting');
+    setShowQsDropdown(false);
+    qsConnectingUrlRef.current = url;
     if (qsConnectTimerRef.current) clearTimeout(qsConnectTimerRef.current);
     qsConnectTimerRef.current = setTimeout(() => {
       setQsConnectStatus(prev => prev === 'connecting' ? 'error' : prev);
@@ -329,8 +361,37 @@ export default function App() {
     if (qsStatus !== null) {
       setQsConnectStatus('ok');
       if (qsConnectTimerRef.current) { clearTimeout(qsConnectTimerRef.current); qsConnectTimerRef.current = null; }
+      if (qsConnectingUrlRef.current) setRecentQsServers(saveRecentQsServer(qsConnectingUrlRef.current));
     }
   }, [qsStatus]);
+
+  useEffect(() => {
+    if (!showQsDropdown) return;
+    const handler = (e: MouseEvent) => {
+      if (qsComboRef.current && !qsComboRef.current.contains(e.target as Node))
+        setShowQsDropdown(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showQsDropdown]);
+
+  // Save to recent servers on successful connect
+  useEffect(() => {
+    if (tiledStatus === 'ok' && connectingUrlRef.current) {
+      setRecentServers(saveRecentServer(connectingUrlRef.current));
+    }
+  }, [tiledStatus]);
+
+  // Close server dropdown on outside click
+  useEffect(() => {
+    if (!showServerDropdown) return;
+    const handler = (e: MouseEvent) => {
+      if (serverComboRef.current && !serverComboRef.current.contains(e.target as Node))
+        setShowServerDropdown(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showServerDropdown]);
 
   // Fetch top-level items whenever the server changes.
   // If the root items are BlueskyRuns (flat server), skip the catalog dropdown and use '' as the catalog.
@@ -573,13 +634,48 @@ export default function App() {
         {appTab === 'visualizer' && (
           <div className="ml-auto flex items-center gap-2">
             <label className="text-sky-300 text-xs font-medium">Server</label>
-            <input
-              className="bg-sky-900 text-white text-sm px-3 py-1.5 rounded border border-sky-700 focus:outline-none focus:border-sky-400 w-72 placeholder:text-sky-500"
-              value={inputUrl}
-              onChange={(e) => setInputUrl(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
-              placeholder="http://localhost:8000"
-            />
+            <div className="relative" ref={serverComboRef}>
+              <div className="flex">
+                <input
+                  className="bg-sky-900 text-white text-sm px-3 py-1.5 rounded-l border border-sky-700 focus:outline-none focus:border-sky-400 w-72 placeholder:text-sky-500"
+                  value={inputUrl}
+                  onChange={(e) => setInputUrl(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleConnect(); else if (e.key === 'Escape') setShowServerDropdown(false); }}
+                  onFocus={() => recentServers.length > 0 && setShowServerDropdown(true)}
+                  placeholder="http://localhost:8000"
+                />
+                {recentServers.length > 0 && (
+                  <button
+                    onClick={() => setShowServerDropdown(v => !v)}
+                    className="bg-sky-900 border border-l-0 border-sky-700 text-sky-400 px-2 rounded-r hover:bg-sky-800 transition-colors"
+                  >
+                    <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <polyline points="2,4 6,8 10,4" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+              {showServerDropdown && recentServers.length > 0 && (
+                <div className="absolute top-full left-0 mt-1 min-w-full w-max bg-sky-950 border border-sky-700 rounded shadow-lg z-50 overflow-hidden">
+                  {recentServers.map(url => (
+                    <button
+                      key={url}
+                      onClick={() => { setInputUrl(url); setShowServerDropdown(false); }}
+                      className="w-full text-left px-3 py-1.5 text-sm text-white hover:bg-sky-800 font-mono block whitespace-nowrap"
+                    >
+                      {url}
+                    </button>
+                  ))}
+                  <div className="border-t border-sky-800" />
+                  <button
+                    onClick={() => { setRecentServers([]); localStorage.removeItem('recentServers'); setShowServerDropdown(false); }}
+                    className="w-full text-left px-3 py-1.5 text-xs text-sky-400 hover:bg-sky-800 transition-colors"
+                  >
+                    Clear recent servers
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               onClick={handleConnect}
               className="bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white text-sm px-4 py-1.5 rounded font-medium transition-colors"
@@ -659,13 +755,48 @@ export default function App() {
               </>
             )}
             <label className="text-sky-300 text-xs font-medium">HTTP URL</label>
-            <input
-              className="bg-sky-900 text-white text-sm px-3 py-1.5 rounded border border-sky-700 focus:outline-none focus:border-sky-400 w-96 placeholder:text-sky-500 font-mono"
-              value={qsInputUrl}
-              onChange={e => setQsInputUrl(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleQsConnect()}
-              placeholder="http://localhost:60610"
-            />
+            <div className="relative" ref={qsComboRef}>
+              <div className="flex">
+                <input
+                  className="bg-sky-900 text-white text-sm px-3 py-1.5 rounded-l border border-sky-700 focus:outline-none focus:border-sky-400 w-96 placeholder:text-sky-500 font-mono"
+                  value={qsInputUrl}
+                  onChange={e => setQsInputUrl(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleQsConnect(); else if (e.key === 'Escape') setShowQsDropdown(false); }}
+                  onFocus={() => recentQsServers.length > 0 && setShowQsDropdown(true)}
+                  placeholder="http://localhost:60610"
+                />
+                {recentQsServers.length > 0 && (
+                  <button
+                    onClick={() => setShowQsDropdown(v => !v)}
+                    className="bg-sky-900 border border-l-0 border-sky-700 text-sky-400 px-2 rounded-r hover:bg-sky-800 transition-colors"
+                  >
+                    <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <polyline points="2,4 6,8 10,4" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+              {showQsDropdown && recentQsServers.length > 0 && (
+                <div className="absolute top-full left-0 mt-1 min-w-full w-max bg-sky-950 border border-sky-700 rounded shadow-lg z-50 overflow-hidden">
+                  {recentQsServers.map(url => (
+                    <button
+                      key={url}
+                      onClick={() => { setQsInputUrl(url); setShowQsDropdown(false); }}
+                      className="w-full text-left px-3 py-1.5 text-sm text-white hover:bg-sky-800 font-mono block whitespace-nowrap"
+                    >
+                      {url}
+                    </button>
+                  ))}
+                  <div className="border-t border-sky-800" />
+                  <button
+                    onClick={() => { setRecentQsServers([]); localStorage.removeItem('recentQsServers'); setShowQsDropdown(false); }}
+                    className="w-full text-left px-3 py-1.5 text-xs text-sky-400 hover:bg-sky-800 transition-colors"
+                  >
+                    Clear recent servers
+                  </button>
+                </div>
+              )}
+            </div>
 
             <button
               onClick={handleQsConnect}
