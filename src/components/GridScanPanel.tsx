@@ -8,6 +8,7 @@ type Props = {
   shape: [number, number] | null;
   dimensions: string[][];
   zField?: string;
+  onClose?: () => void;
   onAnalyzeCut?: (x: number[], y: number[], xLabel: string, yLabel: string, title: string) => void;
 };
 
@@ -134,7 +135,7 @@ function drawHeatmap(
   }
 }
 
-export default function GridScanPanel({ serverUrl, catalog, runId, dimensions, zField, onAnalyzeCut }: Props) {
+export default function GridScanPanel({ serverUrl, catalog, runId, dimensions, zField, onClose, onAnalyzeCut }: Props) {
   const slowMotor = dimensions[0]?.[0] ?? '';
   const fastMotor = dimensions[1]?.[0] ?? '';
 
@@ -146,9 +147,13 @@ export default function GridScanPanel({ serverUrl, catalog, runId, dimensions, z
   const [colormap, setColormap] = useState(() => localStorage.getItem('heatmapColormap') ?? 'viridis');
   const [viewport, setViewport] = useState<Viewport | null>(null);
   const [selBox, setSelBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [colSplit, setColSplit] = useState(() => { const s = parseFloat(localStorage.getItem('heatmapColSplit') ?? ''); return isNaN(s) ? 60 : s; });
+  const [rowSplit, setRowSplit] = useState(() => { const s = parseFloat(localStorage.getItem('heatmapRowSplit') ?? ''); return isNaN(s) ? 60 : s; });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const layoutRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
+  const splitDragRef = useRef<'col' | 'row' | null>(null);
   // always-current viewport for use in imperative event handlers
   const vpRef = useRef<Viewport>({ r0: 0, r1: 1, c0: 0, c1: 1 });
 
@@ -169,10 +174,12 @@ export default function GridScanPanel({ serverUrl, catalog, runId, dimensions, z
   }, [runId, serverUrl, catalog]);
 
   const effectiveZField = useMemo(() => {
-    if (zField) return zField;
     if (!allData) return '';
     const motors = new Set([slowMotor, fastMotor]);
-    return Object.keys(allData).find(f => !motors.has(f) && f !== 'time') ?? '';
+    const autoField = Object.keys(allData).find(f => !motors.has(f) && f !== 'time') ?? '';
+    // Use the prop only if it actually exists in allData; otherwise fall back to auto-pick
+    if (zField && allData[zField]) return zField;
+    return autoField;
   }, [zField, allData, slowMotor, fastMotor]);
 
   const { zMatrix, slowAxis, fastAxis } = useMemo<{
@@ -221,6 +228,27 @@ export default function GridScanPanel({ serverUrl, catalog, runId, dimensions, z
     const palette = COLORMAPS[colormap] ?? COLORMAPS.viridis;
     drawHeatmap(canvas, zMatrix, crossRow, crossCol, vpRef.current, t => interpolateColor(palette, t));
   }, [zMatrix, crossRow, crossCol, viewport, colormap]);
+
+  // Split drag (col/row dividers)
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!splitDragRef.current || !layoutRef.current) return;
+      const rect = layoutRef.current.getBoundingClientRect();
+      if (splitDragRef.current === 'col') {
+        const v = Math.max(20, Math.min(80, ((e.clientX - rect.left) / rect.width) * 100));
+        setColSplit(v);
+        localStorage.setItem('heatmapColSplit', String(v));
+      } else {
+        const v = Math.max(20, Math.min(80, ((e.clientY - rect.top) / rect.height) * 100));
+        setRowSplit(v);
+        localStorage.setItem('heatmapRowSplit', String(v));
+      }
+    };
+    const onUp = () => { splitDragRef.current = null; };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, []);
 
   // Resize canvas
   useEffect(() => {
@@ -360,6 +388,7 @@ export default function GridScanPanel({ serverUrl, catalog, runId, dimensions, z
   if (loading) return <div className="h-full flex items-center justify-center text-gray-400 text-sm">Loading…</div>;
   if (error) return <div className="h-full flex items-center justify-center text-red-400 text-sm">{error}</div>;
   if (!allData) return <div className="h-full flex items-center justify-center text-gray-400 text-sm">No data</div>;
+  if (!zMatrix) return <div className="h-full flex items-center justify-center text-gray-400 text-sm">Select a Z field in the field table</div>;
 
   return (
     <div className="h-full flex flex-col gap-2 overflow-hidden">
@@ -387,12 +416,21 @@ export default function GridScanPanel({ serverUrl, catalog, runId, dimensions, z
             {slowMotor}={slowAxis[crossRow]?.toPrecision(4)} · {fastMotor}={fastAxis[crossCol]?.toPrecision(4)}
           </span>
         )}
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="ml-auto text-gray-400 hover:text-gray-600 text-xl leading-none"
+            aria-label="Close panel"
+          >×</button>
+        )}
       </div>
 
-      {/* Main layout: heatmap + cuts */}
-      <div className="flex-1 min-h-0 grid grid-cols-2 grid-rows-2 gap-2">
+      {/* Main layout: heatmap + cuts (resizable) */}
+      <div ref={layoutRef} className="flex-1 min-h-0 flex flex-col select-none">
+        {/* Top row */}
+        <div className="flex min-h-0" style={{ height: `${rowSplit}%` }}>
         {/* Heatmap */}
-        <div className="relative bg-gray-900 rounded overflow-hidden" ref={containerRef}>
+        <div className="relative bg-gray-900 rounded overflow-hidden" ref={containerRef} style={{ width: `${colSplit}%` }}>
           <canvas
             ref={canvasRef}
             className={`w-full h-full ${isZoomed ? 'cursor-grab active:cursor-grabbing' : 'cursor-crosshair'}`}
@@ -417,68 +455,87 @@ export default function GridScanPanel({ serverUrl, catalog, runId, dimensions, z
           </div>
         </div>
 
-        {/* Vertical cut */}
-        <div className="relative bg-white rounded border border-gray-200 overflow-hidden">
-          {vertCut ? (
-            <>
-              <PlotlyScatter
-                data={[{ x: vertCut.x, y: vertCut.y, type: 'scatter', mode: 'lines+markers', line: { color: '#0ea5e9' }, marker: { size: 4 } }]}
-                xAxisTitle={slowMotor}
-                yAxisTitle={effectiveZField}
-                className="w-full h-full"
-              />
-              {onAnalyzeCut && (
-                <button
-                  onClick={() => onAnalyzeCut(vertCut.x, vertCut.y, slowMotor, effectiveZField, `${effectiveZField} vs ${slowMotor} (vertical cut)`)}
-                  className="absolute top-1 right-1 text-[10px] px-1.5 py-0.5 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded text-gray-600"
-                  title="Open in analysis panel"
-                >
-                  Analyze
-                </button>
-              )}
-            </>
-          ) : (
-            <div className="h-full flex items-center justify-center text-xs text-gray-400">Click heatmap for vertical cut</div>
-          )}
-        </div>
+          {/* Column drag handle */}
+          <div
+            className="w-1.5 shrink-0 cursor-col-resize bg-gray-200 hover:bg-sky-300 active:bg-sky-400 transition-colors rounded mx-0.5"
+            onMouseDown={e => { e.preventDefault(); splitDragRef.current = 'col'; }}
+          />
 
-        {/* Horizontal cut */}
-        <div className="relative bg-white rounded border border-gray-200 overflow-hidden">
-          {horizCut ? (
-            <>
-              <PlotlyScatter
-                data={[{ x: horizCut.x, y: horizCut.y, type: 'scatter', mode: 'lines+markers', line: { color: '#10b981' }, marker: { size: 4 } }]}
-                xAxisTitle={fastMotor}
-                yAxisTitle={effectiveZField}
-                className="w-full h-full"
-              />
-              {onAnalyzeCut && (
-                <button
-                  onClick={() => onAnalyzeCut(horizCut.x, horizCut.y, fastMotor, effectiveZField, `${effectiveZField} vs ${fastMotor} (horizontal cut)`)}
-                  className="absolute top-1 right-1 text-[10px] px-1.5 py-0.5 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded text-gray-600"
-                  title="Open in analysis panel"
-                >
-                  Analyze
-                </button>
-              )}
-            </>
-          ) : (
-            <div className="h-full flex items-center justify-center text-xs text-gray-400">Click heatmap for horizontal cut</div>
-          )}
-        </div>
-
-        {/* Info */}
-        <div className="bg-gray-50 rounded border border-gray-200 flex items-center justify-center">
-          <div className="text-xs text-gray-400 text-center px-3">
-            <p className="font-medium text-gray-500">{runId.slice(0, 8)}…</p>
-            <p className="mt-1">{nRows} rows × {nCols} cols</p>
-            {zMatrix && (
-              <p className="mt-1 font-mono">
-                z: [{Math.min(...zMatrix.flat().filter(isFinite)).toPrecision(4)}, {Math.max(...zMatrix.flat().filter(isFinite)).toPrecision(4)}]
-              </p>
+          {/* Vertical cut */}
+          <div className="relative bg-white rounded border border-gray-200 overflow-hidden flex-1">
+            {vertCut ? (
+              <>
+                <PlotlyScatter
+                  data={[{ x: vertCut.x, y: vertCut.y, type: 'scatter', mode: 'lines+markers', line: { color: '#0ea5e9' }, marker: { size: 4 } }]}
+                  xAxisTitle={slowMotor}
+                  yAxisTitle={effectiveZField}
+                  className="w-full h-full"
+                />
+                {onAnalyzeCut && (
+                  <button
+                    onClick={() => onAnalyzeCut(vertCut.x, vertCut.y, slowMotor, effectiveZField, `${effectiveZField} vs ${slowMotor} (vertical cut)`)}
+                    className="absolute top-1 right-1 text-[10px] px-1.5 py-0.5 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded text-gray-600"
+                    title="Open in analysis panel"
+                  >
+                    Analyze
+                  </button>
+                )}
+              </>
+            ) : (
+              <div className="h-full flex items-center justify-center text-xs text-gray-400">Click heatmap for vertical cut</div>
             )}
           </div>
-        </div>
+        </div>{/* end top row */}
+
+        {/* Row drag handle */}
+        <div
+          className="h-1.5 shrink-0 cursor-row-resize bg-gray-200 hover:bg-sky-300 active:bg-sky-400 transition-colors rounded my-0.5"
+          onMouseDown={e => { e.preventDefault(); splitDragRef.current = 'row'; }}
+        />
+
+        {/* Bottom row */}
+        <div className="flex min-h-0 flex-1">
+          {/* Horizontal cut */}
+          <div className="relative bg-white rounded border border-gray-200 overflow-hidden" style={{ width: `${colSplit}%` }}>
+            {horizCut ? (
+              <>
+                <PlotlyScatter
+                  data={[{ x: horizCut.x, y: horizCut.y, type: 'scatter', mode: 'lines+markers', line: { color: '#10b981' }, marker: { size: 4 } }]}
+                  xAxisTitle={fastMotor}
+                  yAxisTitle={effectiveZField}
+                  className="w-full h-full"
+                />
+                {onAnalyzeCut && (
+                  <button
+                    onClick={() => onAnalyzeCut(horizCut.x, horizCut.y, fastMotor, effectiveZField, `${effectiveZField} vs ${fastMotor} (horizontal cut)`)}
+                    className="absolute top-1 right-1 text-[10px] px-1.5 py-0.5 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded text-gray-600"
+                    title="Open in analysis panel"
+                  >
+                    Analyze
+                  </button>
+                )}
+              </>
+            ) : (
+              <div className="h-full flex items-center justify-center text-xs text-gray-400">Click heatmap for horizontal cut</div>
+            )}
+          </div>
+
+          {/* Spacer aligned with column handle */}
+          <div className="w-1.5 shrink-0 mx-0.5" />
+
+          {/* Info */}
+          <div className="bg-gray-50 rounded border border-gray-200 flex-1 flex items-center justify-center">
+            <div className="text-xs text-gray-400 text-center px-3">
+              <p className="font-medium text-gray-500">{runId.slice(0, 8)}…</p>
+              <p className="mt-1">{nRows} rows × {nCols} cols</p>
+              {zMatrix && (
+                <p className="mt-1 font-mono">
+                  z: [{Math.min(...zMatrix.flat().filter(isFinite)).toPrecision(4)}, {Math.max(...zMatrix.flat().filter(isFinite)).toPrecision(4)}]
+                </p>
+              )}
+            </div>
+          </div>
+        </div>{/* end bottom row */}
       </div>
     </div>
   );
