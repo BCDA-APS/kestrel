@@ -188,6 +188,17 @@ export default function App() {
   const [centerTab, setCenterTab] = useState<'graph' | 'data' | 'metadata' | 'summary'>('graph');
   const [appTab, setAppTab] = useState<'visualizer' | 'qserver'>('visualizer');
   const [splitView, setSplitView] = useState(false);
+  const [settings, setSettings] = useState<{ qserverEnabled?: boolean }>(() => {
+    try { return JSON.parse(localStorage.getItem('appSettings') ?? '{}'); } catch { return {}; }
+  });
+  const [showSettings, setShowSettings] = useState(false);
+  const settingsRef = useRef<HTMLDivElement>(null);
+  const qserverEnabled = settings.qserverEnabled !== false;
+  const updateSetting = <K extends keyof typeof settings>(key: K, val: (typeof settings)[K]) => {
+    const next = { ...settings, [key]: val };
+    setSettings(next);
+    localStorage.setItem('appSettings', JSON.stringify(next));
+  };
   const [splitQsWidth, setSplitQsWidth] = useState(() => Math.round(window.innerWidth * 0.45));
   const [qsInputUrl, setQsInputUrl] = useState(loadQsUrl);
   const [qsInputApiKey, setQsInputApiKey] = useState(() => localStorage.getItem('qsApiKey') ?? '');
@@ -215,6 +226,24 @@ export default function App() {
   const [addRunError, setAddRunError] = useState<string | null>(null);
   const panelRef = useRef(panel);
   useEffect(() => { panelRef.current = panel; }, [panel]);
+
+  // Guard: if QServer is disabled, revert any QServer-related state
+  useEffect(() => {
+    if (!qserverEnabled) {
+      if (appTab === 'qserver') setAppTab('visualizer');
+      if (splitView) setSplitView(false);
+    }
+  }, [qserverEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Close settings dropdown on outside click
+  useEffect(() => {
+    if (!showSettings) return;
+    const handler = (e: MouseEvent) => {
+      if (!settingsRef.current?.contains(e.target as Node)) setShowSettings(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showSettings]);
 
   const [derivativeTraces, setDerivativeTraces] = useState<XYTrace[]>([]);
   // Track derivative source by identity so adding/removing other traces doesn't shift it
@@ -736,13 +765,31 @@ export default function App() {
             {qsConnectStatus === 'ok' && <span className="shrink-0 flex items-center gap-1.5 text-xs text-green-400"><span className="w-2 h-2 rounded-full bg-green-400" />Connected</span>}
             {qsConnectStatus === 'error' && <span className="shrink-0 flex items-center gap-1.5 text-xs text-red-400"><span className="w-2 h-2 rounded-full bg-red-400" />Failed</span>}
           </div>
+          {/* Settings gear */}
+          <div className="relative flex-none" ref={settingsRef}>
+            <button onClick={() => setShowSettings(v => !v)} title="Settings" className="p-2 rounded text-sky-400 hover:text-white hover:bg-sky-800 transition-colors">
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
+            {showSettings && (
+              <div className="absolute top-full right-0 mt-1 w-64 bg-sky-950 border border-sky-700 rounded shadow-lg z-50 p-3">
+                <p className="text-sky-400 text-[10px] font-medium uppercase tracking-wide mb-2">Settings</p>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={qserverEnabled} onChange={e => updateSetting('qserverEnabled', e.target.checked)} className="accent-sky-500" />
+                  <span className="text-white text-xs">Enable QServer panel</span>
+                </label>
+              </div>
+            )}
+          </div>
         </header>
       ) : (
         /* ── Non-split mode header: tabs + active panel controls ── */
         <header className="flex-none h-12 bg-sky-950 flex items-center px-3 gap-2 shadow-md z-10">
           {/* Tabs */}
           <div className="flex items-end h-full gap-0.5 pt-1.5 shrink-0">
-            {(['visualizer', 'qserver'] as const).map(tab => (
+            {(['visualizer', ...(qserverEnabled ? ['qserver'] : [])] as ('visualizer' | 'qserver')[]).map(tab => (
               <button
                 key={tab}
                 onClick={() => setAppTab(tab)}
@@ -756,16 +803,18 @@ export default function App() {
               </button>
             ))}
           </div>
-          {/* Split toggle */}
-          <button
-            onClick={() => setSplitView(v => !v)}
-            title="Split view: Visualizer + QServer side by side"
-            className="shrink-0 px-2 py-1 rounded transition-colors text-sky-400 hover:text-white hover:bg-sky-800"
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="12" y1="3" x2="12" y2="21" />
-            </svg>
-          </button>
+          {/* Split toggle (only when QServer enabled) */}
+          {qserverEnabled && (
+            <button
+              onClick={() => setSplitView(v => !v)}
+              title="Split view: Visualizer + QServer side by side"
+              className="shrink-0 px-2 py-1 rounded transition-colors text-sky-400 hover:text-white hover:bg-sky-800"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="12" y1="3" x2="12" y2="21" />
+              </svg>
+            </button>
+          )}
           {/* Tiled controls (visualizer tab only) */}
           {appTab === 'visualizer' && (
             <div className="ml-auto flex items-center gap-2 overflow-hidden shrink-0">
@@ -871,6 +920,24 @@ export default function App() {
               {qsConnectStatus === 'error' && <span className="shrink-0 flex items-center gap-1.5 text-xs text-red-400"><span className="w-2 h-2 rounded-full bg-red-400" />Failed</span>}
             </div>
           )}
+          {/* Settings gear */}
+          <div className="relative shrink-0" ref={settingsRef}>
+            <button onClick={() => setShowSettings(v => !v)} title="Settings" className="p-2 rounded text-sky-400 hover:text-white hover:bg-sky-800 transition-colors">
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
+            {showSettings && (
+              <div className="absolute top-full right-0 mt-1 w-64 bg-sky-950 border border-sky-700 rounded shadow-lg z-50 p-3">
+                <p className="text-sky-400 text-[10px] font-medium uppercase tracking-wide mb-2">Settings</p>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={qserverEnabled} onChange={e => updateSetting('qserverEnabled', e.target.checked)} className="accent-sky-500" />
+                  <span className="text-white text-xs">Enable QServer panel</span>
+                </label>
+              </div>
+            )}
+          </div>
         </header>
       )}
 
