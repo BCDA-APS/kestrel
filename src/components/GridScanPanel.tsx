@@ -41,7 +41,8 @@ function interpolateColor(palette: RGB[], t: number): RGB {
   return [0, 1, 2].map(i => Math.round(palette[lo][i] + frac * (palette[hi][i] - palette[lo][i]))) as RGB;
 }
 
-async function fetchAllColumns(serverUrl: string, cs: string, runId: string): Promise<Record<string, number[]> | null> {
+// Mirrors RunDataTab.resolveTableSource: finds the correct table/full URL for the primary stream.
+async function resolveTableUrl(serverUrl: string, cs: string, runId: string): Promise<{ tableUrl: string; arrayBase: string | null; columns?: string[] } | null> {
   const sj = await fetch(`${serverUrl}/api/v1/search${cs}/${runId}?page[limit]=50`).then(r => r.json());
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const streams: string[] = (sj.data ?? []).map((d: any) => d.id);
@@ -50,33 +51,78 @@ async function fetchAllColumns(serverUrl: string, cs: string, runId: string): Pr
 
   const fj = await fetch(`${serverUrl}/api/v1/search${cs}/${runId}/${stream}?page[limit]=200`).then(r => r.json());
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let columns: string[] = (fj.data ?? []).filter((i: any) => i.attributes?.structure_family === 'array').map((i: any) => i.id);
-  let arrayBase = `${serverUrl}/api/v1/array/full${cs}/${runId}/${stream}`;
+  const items: any[] = fj.data ?? [];
 
-  if (columns.length === 0) {
-    for (const sub of ['data', 'internal']) {
-      const subj = await fetch(`${serverUrl}/api/v1/search${cs}/${runId}/${stream}/${sub}?page[limit]=200`).then(r => r.json());
+  // Case 1: table node directly under stream (PostgreSQL adapter)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tblItem = items.find((i: any) => i.attributes?.structure_family === 'table');
+  if (tblItem) {
+    return { tableUrl: `${serverUrl}/api/v1/table/full${cs}/${runId}/${stream}/${tblItem.id}?format=application/json`, arrayBase: null };
+  }
+
+  // Case 2: arrays directly under stream
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const hasArrays = items.some((i: any) => i.attributes?.structure_family === 'array');
+  if (hasArrays) {
+    return {
+      tableUrl: `${serverUrl}/api/v1/table/full${cs}/${runId}/${stream}?format=application/json`,
+      arrayBase: `${serverUrl}/api/v1/array/full${cs}/${runId}/${stream}`,
+    };
+  }
+
+  // Case 3: sub-nodes (MongoDB adapter: primary/data or primary/internal)
+  for (const sub of ['data', 'internal']) {
+    const subPath = `${cs}/${runId}/${stream}/${sub}`;
+    const subR = await fetch(`${serverUrl}/api/v1/search${subPath}?page[limit]=200`);
+    if (subR.ok) {
+      const subJson = await subR.json();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const cols: string[] = (subj.data ?? []).filter((i: any) => i.attributes?.structure_family === 'array').map((i: any) => i.id);
-      if (cols.length > 0) { columns = cols; arrayBase = `${serverUrl}/api/v1/array/full${cs}/${runId}/${stream}/${sub}`; break; }
-    }
-    if (columns.length === 0) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const tblItem = (fj.data ?? []).find((i: any) => i.attributes?.structure_family === 'table');
-      if (tblItem) { columns = tblItem.attributes?.structure?.columns ?? []; arrayBase = `${serverUrl}/api/v1/array/full${cs}/${runId}/${stream}/${tblItem.id}`; }
+      const arrayItems: any[] = (subJson.data ?? []).filter((i: any) => i.attributes?.structure_family === 'array');
+      if (arrayItems.length > 0) {
+        return {
+          tableUrl: `${serverUrl}/api/v1/table/full${subPath}?format=application/json`,
+          arrayBase: `${serverUrl}/api/v1/array/full${subPath}`,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          columns: arrayItems.map((i: any) => i.id),
+        };
+      }
     }
   }
-  if (columns.length === 0) return null;
+  return null;
+}
 
-  const entries = await Promise.all(
-    columns.map(async col => {
-      const r = await fetch(`${arrayBase}/${col}?format=application/json`);
-      if (!r.ok) return [col, []] as [string, number[]];
-      const data = await r.json();
-      return [col, Array.isArray(data) ? data.map(Number) : []] as [string, number[]];
-    })
-  );
-  return Object.fromEntries(entries);
+async function fetchAllColumns(serverUrl: string, cs: string, runId: string): Promise<Record<string, number[]> | null> {
+  const source = await resolveTableUrl(serverUrl, cs, runId);
+  if (!source) return null;
+
+  // Primary path: table/full returns all columns at once as {colName: number[]}
+  const r = await fetch(source.tableUrl);
+  if (r.ok) {
+    const d: Record<string, unknown[]> = await r.json();
+    return Object.fromEntries(
+      Object.entries(d).map(([k, v]) => [k, Array.isArray(v) ? (v as unknown[]).map(Number) : []])
+    );
+  }
+
+  // Fallback: fetch columns individually via array/full
+  if (source.arrayBase) {
+    const cols: string[] = source.columns
+      ?? await fetch(`${source.arrayBase.replace('/api/v1/array/full', '/api/v1/search')}?page[limit]=200`)
+          .then(sr => sr.json())
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .then(sj => (sj.data ?? []).filter((i: any) => i.attributes?.structure_family === 'array').map((i: any) => i.id));
+    const entries = await Promise.all(
+      cols.map(async col => {
+        const cr = await fetch(`${source.arrayBase}/${col}?format=application/json`);
+        if (!cr.ok) return [col, []] as [string, number[]];
+        const data = await cr.json();
+        return [col, Array.isArray(data) ? (data as unknown[]).map(Number) : []] as [string, number[]];
+      })
+    );
+    return Object.fromEntries(entries);
+  }
+
+  return null;
 }
 
 // Backward-mapping render: for each canvas pixel, look up the grid cell it belongs to.
@@ -178,7 +224,7 @@ export default function GridScanPanel({ serverUrl, catalog, runId, dimensions, z
     const motors = new Set([slowMotor, fastMotor]);
     const autoField = Object.keys(allData).find(f => !motors.has(f) && f !== 'time') ?? '';
     // Use the prop only if it actually exists in allData; otherwise fall back to auto-pick
-    if (zField && allData[zField]) return zField;
+    if (zField && allData[zField]?.length > 0) return zField;
     return autoField;
   }, [zField, allData, slowMotor, fastMotor]);
 
