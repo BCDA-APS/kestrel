@@ -187,6 +187,8 @@ export default function App() {
   const [smoothingWindow, setSmoothingWindow] = useState(1);
   const [centerTab, setCenterTab] = useState<'graph' | 'data' | 'metadata' | 'summary'>('graph');
   const [appTab, setAppTab] = useState<'visualizer' | 'qserver'>('visualizer');
+  const [splitView, setSplitView] = useState(false);
+  const [splitQsWidth, setSplitQsWidth] = useState(() => Math.round(window.innerWidth * 0.45));
   const [qsInputUrl, setQsInputUrl] = useState(loadQsUrl);
   const [qsInputApiKey, setQsInputApiKey] = useState(() => localStorage.getItem('qsApiKey') ?? '');
   const [qsProxyUrl, setQsProxyUrl] = useState(() => toQsProxyUrl(loadQsUrl()));
@@ -535,6 +537,15 @@ export default function App() {
     document.addEventListener('mouseup', onMouseUp);
   }, [sidebarWidth]);
 
+  const dragSplit = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX, startW = splitQsWidth;
+    const onMove = (ev: MouseEvent) => setSplitQsWidth(Math.max(300, Math.min(window.innerWidth - 400, startW - (ev.clientX - startX))));
+    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [splitQsWidth]);
+
   const handleAnalysisDividerMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
@@ -610,48 +621,25 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-gray-50">
       {/* Header */}
-      <header className="flex-none h-12 bg-sky-950 flex items-center px-4 gap-4 shadow-md z-10">
-        {/* App tabs */}
-        <div className="flex items-end h-full gap-0.5 pt-1.5">
-          {(['visualizer', 'qserver'] as const).map(tab => (
+      {splitView ? (
+        /* ── Split mode header: two sections aligned with body panels ── */
+        <header className="flex-none h-12 bg-sky-950 flex shadow-md z-10">
+          {/* Visualizer section */}
+          <div className="flex flex-1 items-center gap-2 px-3 min-w-0 overflow-hidden">
             <button
-              key={tab}
-              onClick={() => setAppTab(tab)}
-              className={`px-4 h-full text-sm font-medium rounded-t transition-colors flex items-center gap-1.5 ${
-                appTab === tab
-                  ? 'bg-sky-100 text-sky-900'
-                  : 'text-sky-300 hover:text-white hover:bg-sky-800'
-              }`}
+              onClick={() => setSplitView(v => !v)}
+              title="Exit split view"
+              className="shrink-0 px-2 py-1 rounded transition-colors bg-sky-500 text-white"
             >
-              {tab === 'visualizer' ? (
-                <>
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-                  </svg>
-                  Visualizer
-                </>
-              ) : (
-                <>
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <polygon points="12 2 2 7 12 12 22 7 12 2" />
-                    <polyline points="2 12 12 17 22 12" />
-                    <polyline points="2 17 12 22 22 17" />
-                  </svg>
-                  Q Server
-                </>
-              )}
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="12" y1="3" x2="12" y2="21" />
+              </svg>
             </button>
-          ))}
-        </div>
-
-        {/* Tiled server controls (visualizer only) */}
-        {appTab === 'visualizer' && (
-          <div className="ml-auto flex items-center gap-2">
-            <label className="text-sky-300 text-xs font-medium">Server</label>
-            <div className="relative" ref={serverComboRef}>
+            <label className="text-sky-300 text-xs font-medium shrink-0">Server</label>
+            <div className="relative min-w-0 flex-1" ref={serverComboRef}>
               <div className="flex">
                 <input
-                  className="bg-sky-900 text-white text-sm px-3 py-1.5 rounded-l border border-sky-700 focus:outline-none focus:border-sky-400 w-72 placeholder:text-sky-500"
+                  className="bg-sky-900 text-white font-mono text-xs px-2 py-1.5 rounded-l border border-sky-700 focus:outline-none focus:border-sky-400 placeholder:text-sky-500 min-w-0 flex-1 w-0"
                   value={inputUrl}
                   onChange={(e) => setInputUrl(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleConnect(); else if (e.key === 'Escape') setShowServerDropdown(false); }}
@@ -659,120 +647,68 @@ export default function App() {
                   placeholder="http://localhost:8000"
                 />
                 {recentServers.length > 0 && (
-                  <button
-                    onClick={() => setShowServerDropdown(v => !v)}
-                    className="bg-sky-900 border border-l-0 border-sky-700 text-sky-400 px-2 rounded-r hover:bg-sky-800 transition-colors"
-                  >
-                    <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <polyline points="2,4 6,8 10,4" />
-                    </svg>
+                  <button onClick={() => setShowServerDropdown(v => !v)} className="bg-sky-900 border border-l-0 border-sky-700 text-sky-400 px-2 rounded-r hover:bg-sky-800 transition-colors shrink-0">
+                    <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2}><polyline points="2,4 6,8 10,4" /></svg>
                   </button>
                 )}
               </div>
               {showServerDropdown && recentServers.length > 0 && (
                 <div className="absolute top-full left-0 mt-1 min-w-full w-max bg-sky-950 border border-sky-700 rounded shadow-lg z-50 overflow-hidden">
                   {recentServers.map(url => (
-                    <button
-                      key={url}
-                      onClick={() => handleConnect(url)}
-                      className="w-full text-left px-3 py-1.5 text-sm text-white hover:bg-sky-800 font-mono block whitespace-nowrap"
-                    >
-                      {url}
-                    </button>
+                    <button key={url} onClick={() => handleConnect(url)} className="w-full text-left px-3 py-1.5 text-xs text-white hover:bg-sky-800 font-mono block whitespace-nowrap">{url}</button>
                   ))}
                   <div className="border-t border-sky-800" />
-                  <button
-                    onClick={() => { setRecentServers([]); localStorage.removeItem('recentServers'); setShowServerDropdown(false); }}
-                    className="w-full text-left px-3 py-1.5 text-xs text-sky-400 hover:bg-sky-800 transition-colors"
-                  >
-                    Clear recent servers
-                  </button>
+                  <button onClick={() => { setRecentServers([]); localStorage.removeItem('recentServers'); setShowServerDropdown(false); }} className="w-full text-left px-3 py-1.5 text-xs text-sky-400 hover:bg-sky-800 transition-colors">Clear recent servers</button>
                 </div>
               )}
             </div>
-            <button
-              onClick={handleConnect}
-              className="bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white text-sm px-4 py-1.5 rounded font-medium transition-colors"
-            >
-              Connect
-            </button>
-
-            {tiledStatus === 'connecting' && (
-              <span className="flex items-center gap-1.5 text-xs text-sky-300">
-                <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
-                Connecting…
-              </span>
-            )}
-            {tiledStatus === 'ok' && (
-              <span className="flex items-center gap-1.5 text-xs text-green-400">
-                <span className="w-2 h-2 rounded-full bg-green-400" />
-                Connected
-              </span>
-            )}
-            {tiledStatus === 'error' && (
-              <span className="flex items-center gap-1.5 text-xs text-red-400">
-                <span className="w-2 h-2 rounded-full bg-red-400" />
-                Failed
-              </span>
-            )}
-
+            <button onClick={handleConnect} className="shrink-0 bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white text-xs px-3 py-1.5 rounded font-medium transition-colors">Connect</button>
+            {tiledStatus === 'connecting' && <span className="shrink-0 flex items-center gap-1.5 text-xs text-sky-300"><span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />Connecting…</span>}
+            {tiledStatus === 'ok' && <span className="shrink-0 flex items-center gap-1.5 text-xs text-green-400"><span className="w-2 h-2 rounded-full bg-green-400" />Connected</span>}
+            {tiledStatus === 'error' && <span className="shrink-0 flex items-center gap-1.5 text-xs text-red-400"><span className="w-2 h-2 rounded-full bg-red-400" />Failed</span>}
             {!rootIsRuns && catalogs.length > 0 && (
               <>
-                <div className="w-px h-6 bg-sky-700 mx-1" />
-                <label className="text-sky-300 text-xs font-medium">Catalog</label>
-                <select
-                  value={selectedCatalog ?? ''}
-                  onChange={(e) => { setSelectedCatalog(e.target.value); setSelectedRunId(''); setSelectedRunLabel(''); setRunPage(0); }}
-                  className="bg-sky-900 text-white text-sm px-3 py-1.5 rounded border border-sky-700 focus:outline-none focus:border-sky-400"
-                >
+                <div className="w-px h-6 bg-sky-700 mx-1 shrink-0" />
+                <label className="text-sky-300 text-xs font-medium shrink-0">Catalog</label>
+                <select value={selectedCatalog ?? ''} onChange={(e) => { setSelectedCatalog(e.target.value); setSelectedRunId(''); setSelectedRunLabel(''); setRunPage(0); }} className="bg-sky-900 text-white text-xs px-2 py-1.5 rounded border border-sky-700 focus:outline-none focus:border-sky-400 shrink-0">
                   <option value="">— select —</option>
-                  {catalogs.map((name) => (
-                    <option key={name} value={name}>{name}</option>
-                  ))}
+                  {catalogs.map((name) => <option key={name} value={name}>{name}</option>)}
                 </select>
               </>
             )}
           </div>
-        )}
-
-        {/* QServer controls (qserver tab only) */}
-        {appTab === 'qserver' && (
-          <div className="ml-auto flex items-center gap-6">
+          {/* Divider */}
+          <div className="flex-none w-1 bg-sky-800" />
+          {/* QServer section */}
+          <div className="flex flex-none items-center gap-2 px-3 overflow-hidden" style={{ width: splitQsWidth }}>
             {qsStatus && (
               <>
-                <button
-                  onClick={handleQsEnvToggle}
-                  className={`text-sm px-3 py-1.5 rounded font-medium transition-colors ${qsStatus.worker_environment_exists ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white'}`}
-                >
+                <button onClick={handleQsEnvToggle} className={`shrink-0 text-xs px-2 py-1.5 rounded font-medium transition-colors ${qsStatus.worker_environment_exists ? 'bg-red-400 hover:bg-red-300 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white'}`}>
                   {qsStatus.worker_environment_exists ? 'Close Env' : 'Open Env'}
                 </button>
-                <div className="w-px h-6 bg-sky-700 mx-1" />
-                <div className="flex flex-col items-start leading-tight">
+                <div className="w-px h-6 bg-sky-700 shrink-0" />
+                <div className="flex flex-col items-start leading-tight shrink-0">
                   <span className="text-sky-400 text-[10px] font-medium uppercase tracking-wide">Queue</span>
                   <span className={`font-mono font-medium text-xs ${qsStatus.manager_state === 'executing_queue' ? (qsStatus.queue_stop_pending ? 'text-amber-400' : 'text-sky-300 animate-pulse') : qsStatus.manager_state === 'paused' ? 'text-amber-400' : 'text-green-400'}`}>
                     {qsStatus.manager_state === 'executing_queue' ? (qsStatus.queue_stop_pending ? 'stop pending' : 'running') : qsStatus.manager_state === 'paused' ? 'paused' : 'stopped'}
                   </span>
                 </div>
-                <div className="flex flex-col items-start leading-tight">
+                <div className="flex flex-col items-start leading-tight shrink-0">
                   <span className="text-sky-400 text-[10px] font-medium uppercase tracking-wide">RE</span>
-                  <span className={`font-mono font-medium text-xs ${qsStatus.re_state === 'idle' ? 'text-green-400' : qsStatus.re_state === 'running' ? 'text-sky-300 animate-pulse' : 'text-amber-400'}`}>
-                    {qsStatus.re_state}
-                  </span>
+                  <span className={`font-mono font-medium text-xs ${qsStatus.re_state === 'idle' ? 'text-green-400' : qsStatus.re_state === 'running' ? 'text-sky-300 animate-pulse' : 'text-amber-400'}`}>{qsStatus.re_state}</span>
                 </div>
-                <div className="flex flex-col items-start leading-tight">
+                <div className="flex flex-col items-start leading-tight shrink-0">
                   <span className="text-sky-400 text-[10px] font-medium uppercase tracking-wide">Manager</span>
-                  <span className={`font-mono font-medium text-xs ${qsStatus.manager_state === 'idle' ? 'text-green-400' : 'text-amber-400'}`}>
-                    {qsStatus.manager_state}
-                  </span>
+                  <span className={`font-mono font-medium text-xs ${qsStatus.manager_state === 'idle' ? 'text-green-400' : 'text-amber-400'}`}>{qsStatus.manager_state}</span>
                 </div>
-                <div className="w-px h-6 bg-sky-700 mx-1" />
+                <div className="w-px h-6 bg-sky-700 shrink-0" />
               </>
             )}
-            <label className="text-sky-300 text-xs font-medium">HTTP URL</label>
-            <div className="relative" ref={qsComboRef}>
+            <label className="text-sky-300 text-xs font-medium shrink-0">HTTP URL</label>
+            <div className="relative min-w-0 flex-1" ref={qsComboRef}>
               <div className="flex">
                 <input
-                  className="bg-sky-900 text-white text-sm px-3 py-1.5 rounded-l border border-sky-700 focus:outline-none focus:border-sky-400 w-96 placeholder:text-sky-500 font-mono"
+                  className="bg-sky-900 text-white font-mono text-xs px-2 py-1.5 rounded-l border border-sky-700 focus:outline-none focus:border-sky-400 placeholder:text-sky-500 min-w-0 flex-1 w-0"
                   value={qsInputUrl}
                   onChange={e => setQsInputUrl(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') handleQsConnect(); else if (e.key === 'Escape') setShowQsDropdown(false); }}
@@ -780,72 +716,169 @@ export default function App() {
                   placeholder="http://localhost:60610"
                 />
                 {recentQsServers.length > 0 && (
-                  <button
-                    onClick={() => setShowQsDropdown(v => !v)}
-                    className="bg-sky-900 border border-l-0 border-sky-700 text-sky-400 px-2 rounded-r hover:bg-sky-800 transition-colors"
-                  >
-                    <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <polyline points="2,4 6,8 10,4" />
-                    </svg>
+                  <button onClick={() => setShowQsDropdown(v => !v)} className="bg-sky-900 border border-l-0 border-sky-700 text-sky-400 px-2 rounded-r hover:bg-sky-800 transition-colors shrink-0">
+                    <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2}><polyline points="2,4 6,8 10,4" /></svg>
                   </button>
                 )}
               </div>
               {showQsDropdown && recentQsServers.length > 0 && (
                 <div className="absolute top-full left-0 mt-1 min-w-full w-max bg-sky-950 border border-sky-700 rounded shadow-lg z-50 overflow-hidden">
                   {recentQsServers.map(url => (
-                    <button
-                      key={url}
-                      onClick={() => handleQsConnect(url)}
-                      className="w-full text-left px-3 py-1.5 text-sm text-white hover:bg-sky-800 font-mono block whitespace-nowrap"
-                    >
-                      {url}
-                    </button>
+                    <button key={url} onClick={() => handleQsConnect(url)} className="w-full text-left px-3 py-1.5 text-xs text-white hover:bg-sky-800 font-mono block whitespace-nowrap">{url}</button>
                   ))}
                   <div className="border-t border-sky-800" />
-                  <button
-                    onClick={() => { setRecentQsServers([]); localStorage.removeItem('recentQsServers'); setShowQsDropdown(false); }}
-                    className="w-full text-left px-3 py-1.5 text-xs text-sky-400 hover:bg-sky-800 transition-colors"
-                  >
-                    Clear recent servers
-                  </button>
+                  <button onClick={() => { setRecentQsServers([]); localStorage.removeItem('recentQsServers'); setShowQsDropdown(false); }} className="w-full text-left px-3 py-1.5 text-xs text-sky-400 hover:bg-sky-800 transition-colors">Clear recent servers</button>
                 </div>
               )}
             </div>
-
-            <button
-              onClick={handleQsConnect}
-              className="bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white text-sm px-4 py-1.5 rounded font-medium transition-colors"
-            >Connect</button>
-
-            {qsConnectStatus === 'connecting' && (
-              <span className="flex items-center gap-1.5 text-xs text-sky-300">
-                <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
-                Connecting…
-              </span>
-            )}
-            {qsConnectStatus === 'ok' && (
-              <span className="flex items-center gap-1.5 text-xs text-green-400">
-                <span className="w-2 h-2 rounded-full bg-green-400" />
-                Connected
-              </span>
-            )}
-            {qsConnectStatus === 'error' && (
-              <span className="flex items-center gap-1.5 text-xs text-red-400">
-                <span className="w-2 h-2 rounded-full bg-red-400" />
-                Failed
-              </span>
-            )}
+            <button onClick={handleQsConnect} className="shrink-0 bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white text-xs px-3 py-1.5 rounded font-medium transition-colors">Connect</button>
+            {qsConnectStatus === 'connecting' && <span className="shrink-0 flex items-center gap-1.5 text-xs text-sky-300"><span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />Connecting…</span>}
+            {qsConnectStatus === 'ok' && <span className="shrink-0 flex items-center gap-1.5 text-xs text-green-400"><span className="w-2 h-2 rounded-full bg-green-400" />Connected</span>}
+            {qsConnectStatus === 'error' && <span className="shrink-0 flex items-center gap-1.5 text-xs text-red-400"><span className="w-2 h-2 rounded-full bg-red-400" />Failed</span>}
           </div>
-        )}
-      </header>
+        </header>
+      ) : (
+        /* ── Non-split mode header: tabs + active panel controls ── */
+        <header className="flex-none h-12 bg-sky-950 flex items-center px-3 gap-2 shadow-md z-10">
+          {/* Tabs */}
+          <div className="flex items-end h-full gap-0.5 pt-1.5 shrink-0">
+            {(['visualizer', 'qserver'] as const).map(tab => (
+              <button
+                key={tab}
+                onClick={() => setAppTab(tab)}
+                className={`px-4 h-full text-sm font-medium rounded-t transition-colors flex items-center gap-1.5 ${appTab === tab ? 'bg-sky-100 text-sky-900' : 'text-sky-300 hover:text-white hover:bg-sky-800'}`}
+              >
+                {tab === 'visualizer' ? (
+                  <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>Visualizer</>
+                ) : (
+                  <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 12 12 17 22 12" /><polyline points="2 17 12 22 22 17" /></svg>Q Server</>
+                )}
+              </button>
+            ))}
+          </div>
+          {/* Split toggle */}
+          <button
+            onClick={() => setSplitView(v => !v)}
+            title="Split view: Visualizer + QServer side by side"
+            className="shrink-0 px-2 py-1 rounded transition-colors text-sky-400 hover:text-white hover:bg-sky-800"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="12" y1="3" x2="12" y2="21" />
+            </svg>
+          </button>
+          {/* Tiled controls (visualizer tab only) */}
+          {appTab === 'visualizer' && (
+            <div className="ml-auto flex items-center gap-2 overflow-hidden shrink-0">
+              <label className="text-sky-300 text-xs font-medium shrink-0">Server</label>
+              <div className="relative" ref={serverComboRef}>
+                <div className="flex">
+                  <input
+                    className="bg-sky-900 text-white font-mono text-xs px-2 py-1.5 rounded-l border border-sky-700 focus:outline-none focus:border-sky-400 placeholder:text-sky-500 min-w-0 w-72"
+                    value={inputUrl}
+                    onChange={(e) => setInputUrl(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleConnect(); else if (e.key === 'Escape') setShowServerDropdown(false); }}
+                    onFocus={() => recentServers.length > 0 && setShowServerDropdown(true)}
+                    placeholder="http://localhost:8000"
+                  />
+                  {recentServers.length > 0 && (
+                    <button onClick={() => setShowServerDropdown(v => !v)} className="bg-sky-900 border border-l-0 border-sky-700 text-sky-400 px-2 rounded-r hover:bg-sky-800 transition-colors shrink-0">
+                      <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2}><polyline points="2,4 6,8 10,4" /></svg>
+                    </button>
+                  )}
+                </div>
+                {showServerDropdown && recentServers.length > 0 && (
+                  <div className="absolute top-full left-0 mt-1 min-w-full w-max bg-sky-950 border border-sky-700 rounded shadow-lg z-50 overflow-hidden">
+                    {recentServers.map(url => (
+                      <button key={url} onClick={() => handleConnect(url)} className="w-full text-left px-3 py-1.5 text-xs text-white hover:bg-sky-800 font-mono block whitespace-nowrap">{url}</button>
+                    ))}
+                    <div className="border-t border-sky-800" />
+                    <button onClick={() => { setRecentServers([]); localStorage.removeItem('recentServers'); setShowServerDropdown(false); }} className="w-full text-left px-3 py-1.5 text-xs text-sky-400 hover:bg-sky-800 transition-colors">Clear recent servers</button>
+                  </div>
+                )}
+              </div>
+              <button onClick={handleConnect} className="shrink-0 bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white text-xs px-3 py-1.5 rounded font-medium transition-colors">Connect</button>
+              {tiledStatus === 'connecting' && <span className="shrink-0 flex items-center gap-1.5 text-xs text-sky-300"><span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />Connecting…</span>}
+              {tiledStatus === 'ok' && <span className="shrink-0 flex items-center gap-1.5 text-xs text-green-400"><span className="w-2 h-2 rounded-full bg-green-400" />Connected</span>}
+              {tiledStatus === 'error' && <span className="shrink-0 flex items-center gap-1.5 text-xs text-red-400"><span className="w-2 h-2 rounded-full bg-red-400" />Failed</span>}
+              {!rootIsRuns && catalogs.length > 0 && (
+                <>
+                  <div className="w-px h-6 bg-sky-700 mx-1 shrink-0" />
+                  <label className="text-sky-300 text-xs font-medium shrink-0">Catalog</label>
+                  <select value={selectedCatalog ?? ''} onChange={(e) => { setSelectedCatalog(e.target.value); setSelectedRunId(''); setSelectedRunLabel(''); setRunPage(0); }} className="bg-sky-900 text-white text-xs px-2 py-1.5 rounded border border-sky-700 focus:outline-none focus:border-sky-400 shrink-0">
+                    <option value="">— select —</option>
+                    {catalogs.map((name) => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                </>
+              )}
+            </div>
+          )}
+          {/* QServer controls (qserver tab only) */}
+          {appTab === 'qserver' && (
+            <div className="ml-auto flex items-center gap-2 overflow-hidden shrink-0">
+              {qsStatus && (
+                <>
+                  <button onClick={handleQsEnvToggle} className={`shrink-0 text-xs px-2 py-1.5 rounded font-medium transition-colors ${qsStatus.worker_environment_exists ? 'bg-red-400 hover:bg-red-300 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white'}`}>
+                    {qsStatus.worker_environment_exists ? 'Close Env' : 'Open Env'}
+                  </button>
+                  <div className="w-px h-6 bg-sky-700 shrink-0" />
+                  <div className="flex flex-col items-start leading-tight shrink-0">
+                    <span className="text-sky-400 text-[10px] font-medium uppercase tracking-wide">Queue</span>
+                    <span className={`font-mono font-medium text-xs ${qsStatus.manager_state === 'executing_queue' ? (qsStatus.queue_stop_pending ? 'text-amber-400' : 'text-sky-300 animate-pulse') : qsStatus.manager_state === 'paused' ? 'text-amber-400' : 'text-green-400'}`}>
+                      {qsStatus.manager_state === 'executing_queue' ? (qsStatus.queue_stop_pending ? 'stop pending' : 'running') : qsStatus.manager_state === 'paused' ? 'paused' : 'stopped'}
+                    </span>
+                  </div>
+                  <div className="flex flex-col items-start leading-tight shrink-0">
+                    <span className="text-sky-400 text-[10px] font-medium uppercase tracking-wide">RE</span>
+                    <span className={`font-mono font-medium text-xs ${qsStatus.re_state === 'idle' ? 'text-green-400' : qsStatus.re_state === 'running' ? 'text-sky-300 animate-pulse' : 'text-amber-400'}`}>{qsStatus.re_state}</span>
+                  </div>
+                  <div className="flex flex-col items-start leading-tight shrink-0">
+                    <span className="text-sky-400 text-[10px] font-medium uppercase tracking-wide">Manager</span>
+                    <span className={`font-mono font-medium text-xs ${qsStatus.manager_state === 'idle' ? 'text-green-400' : 'text-amber-400'}`}>{qsStatus.manager_state}</span>
+                  </div>
+                  <div className="w-px h-6 bg-sky-700 shrink-0" />
+                </>
+              )}
+              <label className="text-sky-300 text-xs font-medium shrink-0">HTTP URL</label>
+              <div className="relative" ref={qsComboRef}>
+                <div className="flex">
+                  <input
+                    className="bg-sky-900 text-white font-mono text-xs px-2 py-1.5 rounded-l border border-sky-700 focus:outline-none focus:border-sky-400 placeholder:text-sky-500 w-72"
+                    value={qsInputUrl}
+                    onChange={e => setQsInputUrl(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleQsConnect(); else if (e.key === 'Escape') setShowQsDropdown(false); }}
+                    onFocus={() => recentQsServers.length > 0 && setShowQsDropdown(true)}
+                    placeholder="http://localhost:60610"
+                  />
+                  {recentQsServers.length > 0 && (
+                    <button onClick={() => setShowQsDropdown(v => !v)} className="bg-sky-900 border border-l-0 border-sky-700 text-sky-400 px-2 rounded-r hover:bg-sky-800 transition-colors shrink-0">
+                      <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2}><polyline points="2,4 6,8 10,4" /></svg>
+                    </button>
+                  )}
+                </div>
+                {showQsDropdown && recentQsServers.length > 0 && (
+                  <div className="absolute top-full right-0 mt-1 min-w-full w-max bg-sky-950 border border-sky-700 rounded shadow-lg z-50 overflow-hidden">
+                    {recentQsServers.map(url => (
+                      <button key={url} onClick={() => handleQsConnect(url)} className="w-full text-left px-3 py-1.5 text-xs text-white hover:bg-sky-800 font-mono block whitespace-nowrap">{url}</button>
+                    ))}
+                    <div className="border-t border-sky-800" />
+                    <button onClick={() => { setRecentQsServers([]); localStorage.removeItem('recentQsServers'); setShowQsDropdown(false); }} className="w-full text-left px-3 py-1.5 text-xs text-sky-400 hover:bg-sky-800 transition-colors">Clear recent servers</button>
+                  </div>
+                )}
+              </div>
+              <button onClick={handleQsConnect} className="shrink-0 bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white text-xs px-3 py-1.5 rounded font-medium transition-colors">Connect</button>
+              {qsConnectStatus === 'connecting' && <span className="shrink-0 flex items-center gap-1.5 text-xs text-sky-300"><span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />Connecting…</span>}
+              {qsConnectStatus === 'ok' && <span className="shrink-0 flex items-center gap-1.5 text-xs text-green-400"><span className="w-2 h-2 rounded-full bg-green-400" />Connected</span>}
+              {qsConnectStatus === 'error' && <span className="shrink-0 flex items-center gap-1.5 text-xs text-red-400"><span className="w-2 h-2 rounded-full bg-red-400" />Failed</span>}
+            </div>
+          )}
+        </header>
+      )}
 
-      {/* Queue Server tab — always mounted to preserve console history */}
-      <div className={`flex-1 overflow-hidden ${appTab !== 'qserver' ? 'hidden' : ''}`}>
-        <QServerPanel key={qsConnectionId} proxyUrl={qsProxyUrl} serverUrl={qsInputUrl.replace(/\/$/, '')} onStatusChange={setQsStatus} />
-      </div>
+      {/* Body: flex-row so Visualizer and QServer can sit side by side in split mode */}
+      <div className="flex flex-row flex-1 overflow-hidden">
 
       {/* Visualizer body */}
-      <div className={`flex flex-1 overflow-hidden ${appTab !== 'visualizer' ? 'hidden' : ''}`}>
+      <div className={`flex flex-1 overflow-hidden ${!splitView && appTab !== 'visualizer' ? 'hidden' : ''}`}>
         {/* Sidebar */}
         <aside
           ref={sidebarRef}
@@ -1153,7 +1186,28 @@ export default function App() {
             </aside>
           </div>
         )}
+      </div>{/* end Visualizer body */}
+
+      {/* Split drag handle */}
+      {splitView && (
+        <div
+          className="flex-none w-1 cursor-col-resize bg-gray-200 hover:bg-sky-400 transition-colors z-10"
+          onMouseDown={dragSplit}
+        />
+      )}
+
+      {/* Queue Server panel — always mounted to preserve console history */}
+      <div
+        className={`${splitView ? 'flex-none overflow-x-auto' : 'flex-1 overflow-hidden'} ${!splitView && appTab !== 'qserver' ? 'hidden' : ''}`}
+        style={splitView ? { width: splitQsWidth } : {}}
+      >
+        {/* min-width wrapper so QServer content scrolls rather than clips in split mode */}
+        <div style={splitView ? { minWidth: 1000, height: '100%' } : { height: '100%' }}>
+          <QServerPanel key={qsConnectionId} proxyUrl={qsProxyUrl} serverUrl={qsInputUrl.replace(/\/$/, '')} onStatusChange={setQsStatus} />
+        </div>
       </div>
+
+      </div>{/* end body flex-row */}
     </div>
   );
 }

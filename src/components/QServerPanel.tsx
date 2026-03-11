@@ -5,6 +5,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 type QueueItem = {
   item_type: string;
   name: string;
+  args?: unknown[];
   kwargs: Record<string, unknown>;
   item_uid: string;
   status?: string;
@@ -70,21 +71,108 @@ function planColor(name: string | undefined) {
   return colors[h % colors.length];
 }
 
-function kwargsSummary(kwargs: Record<string, unknown> | null | undefined): string {
-  return Object.entries(kwargs ?? {})
-    .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
-    .join(', ');
+function itemSummary(item: QueueItem, plans: AllowedPlan[]): string {
+  const plan = plans.find(p => p.name === item.name);
+  const params = plan?.parameters ?? [];
+  const varPosIdx = params.findIndex(p => p.kind.name === 'VAR_POSITIONAL');
+  const posParamsBefore = varPosIdx >= 0
+    ? params.slice(0, varPosIdx).filter(p => p.kind.name === 'POSITIONAL_OR_KEYWORD')
+    : [];
+  const parts: string[] = [];
+  const args = item.args ?? [];
+  posParamsBefore.forEach((param, idx) => {
+    if (idx < args.length) parts.push(`${param.name}=${JSON.stringify(args[idx])}`);
+  });
+  if (varPosIdx >= 0) {
+    const remaining = args.slice(posParamsBefore.length);
+    if (remaining.length > 0) parts.push(`${params[varPosIdx].name}=${JSON.stringify(remaining)}`);
+  }
+  for (const [k, v] of Object.entries(item.kwargs ?? {})) parts.push(`${k}=${JSON.stringify(v)}`);
+  return parts.join(', ');
 }
 
-// Parse a user-typed string into a JS value (number, bool, JSON, or string)
+// Parse a user-typed string into a JS value (number, bool, JSON, or Python literal)
 function parseParamValue(s: string): unknown {
   const t = s.trim();
   if (t === '') return undefined;
-  if (t === 'true') return true;
-  if (t === 'false') return false;
+  if (t === 'None' || t === 'null') return null;
+  if (t === 'true' || t === 'True') return true;
+  if (t === 'false' || t === 'False') return false;
   const n = Number(t);
   if (!isNaN(n) && t !== '') return n;
-  try { return JSON.parse(t); } catch { return t; }
+  // Try JSON directly (handles "string", [array], {obj})
+  try { return JSON.parse(t); } catch {}
+  // Try converting Python literal syntax to JSON:
+  //   None/True/False in nested structures, tuples (...) → [...], single-quoted strings
+  try {
+    const j = t
+      .replace(/\bNone\b/g, 'null')
+      .replace(/\bTrue\b/g, 'true')
+      .replace(/\bFalse\b/g, 'false')
+      .replace(/\(/g, '[').replace(/\)/g, ']')
+      .replace(/'([^'\\]*(\\.[^'\\]*)*)'/g, '"$1"');
+    return JSON.parse(j);
+  } catch {}
+  return t;
+}
+
+// Build {args, kwargs} for QServer.
+// When a plan has *args (VAR_POSITIONAL), all POSITIONAL_OR_KEYWORD params before it
+// must also go into args[] (in order), otherwise Python sees a conflict.
+function buildArgsKwargs(paramValues: Record<string, string>, plan: AllowedPlan) {
+  const params = plan.parameters ?? [];
+  const varPosIdx = params.findIndex(p => p.kind.name === 'VAR_POSITIONAL');
+  const posArgs: unknown[] = [];
+  const varArgs: unknown[] = [];
+  const kwargs: Record<string, unknown> = {};
+
+  for (let i = 0; i < params.length; i++) {
+    const param = params[i];
+    const raw = paramValues[param.name];
+    if (raw === undefined) continue;
+    const parsed = parseParamValue(raw);
+    if (parsed === undefined || parsed === null) continue; // omit None — QServer uses its own default
+
+    if (param.kind.name === 'VAR_POSITIONAL') {
+      if (Array.isArray(parsed)) varArgs.push(...parsed);
+    } else if (param.kind.name === 'POSITIONAL_OR_KEYWORD' && varPosIdx >= 0 && i < varPosIdx) {
+      // Must be positional when there is a *args in the plan
+      posArgs.push(parsed);
+    } else {
+      kwargs[param.name] = parsed;
+    }
+  }
+  return { args: [...posArgs, ...varArgs], kwargs };
+}
+
+// Populate form values from an existing QueueItem, reversing buildArgsKwargs
+function itemToParamValues(item: QueueItem, plan: AllowedPlan | undefined): Record<string, string> {
+  const params = plan?.parameters ?? [];
+  const varPosIdx = params.findIndex(p => p.kind.name === 'VAR_POSITIONAL');
+  const posParamsBefore = varPosIdx >= 0
+    ? params.slice(0, varPosIdx).filter(p => p.kind.name === 'POSITIONAL_OR_KEYWORD')
+    : [];
+
+  const vals: Record<string, string> = {};
+  const itemArgs = item.args ?? [];
+
+  // Distribute positional args back to their params
+  posParamsBefore.forEach((param, idx) => {
+    if (idx < itemArgs.length) vals[param.name] = JSON.stringify(itemArgs[idx]);
+  });
+
+  // Remaining args → VAR_POSITIONAL param
+  if (varPosIdx >= 0) {
+    const varPosParam = params[varPosIdx];
+    const remaining = itemArgs.slice(posParamsBefore.length);
+    if (remaining.length > 0) vals[varPosParam.name] = JSON.stringify(remaining);
+  }
+
+  // kwargs
+  for (const [k, v] of Object.entries(item.kwargs ?? {})) {
+    vals[k] = typeof v === 'string' ? v : JSON.stringify(v);
+  }
+  return vals;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -111,8 +199,9 @@ function DragHandle({ onMouseDown }: { onMouseDown: () => void }) {
   );
 }
 
-function QueueCard({ item, running, selected, onSelect, onDelete, onEdit, onDuplicate, dragging, onDragStart, onDragEnd, onDragOver }: {
+function QueueCard({ item, summary, running, selected, onSelect, onDelete, onEdit, onDuplicate, dragging, onDragStart, onDragEnd, onDragOver }: {
   item: QueueItem;
+  summary: string;
   running: boolean;
   selected?: boolean;
   onSelect?: (e: React.MouseEvent) => void;
@@ -151,9 +240,7 @@ function QueueCard({ item, running, selected, onSelect, onDelete, onEdit, onDupl
         <div className="flex items-center gap-2">
           <div className="flex-1 min-w-0">
             <p className="font-semibold truncate">{item.name}</p>
-            {Object.keys(item.kwargs ?? {}).length > 0 && (
-              <p className="text-gray-500 mt-0.5 truncate">{kwargsSummary(item.kwargs)}</p>
-            )}
+            {summary && <p className="text-gray-500 mt-0.5 truncate">{summary}</p>}
           </div>
           <span className="shrink-0 animate-pulse text-sky-600 font-bold text-xl leading-none">▶</span>
         </div>
@@ -179,9 +266,7 @@ function QueueCard({ item, running, selected, onSelect, onDelete, onEdit, onDupl
                 title="Remove"
               >×</button>
             </div>
-            {Object.keys(item.kwargs ?? {}).length > 0 && (
-              <p className="text-gray-500 mt-0.5 truncate">{kwargsSummary(item.kwargs)}</p>
-            )}
+            {summary && <p className="text-gray-500 mt-0.5 truncate">{summary}</p>}
           </div>
         </div>
       )}
@@ -197,7 +282,7 @@ function formatDateTime(ts: number | undefined): string {
   return `${date} ${time}`;
 }
 
-function HistoryCard({ item, onCopyToQueue }: { item: QueueItem; onCopyToQueue?: () => void }) {
+function HistoryCard({ item, summary, onCopyToQueue }: { item: QueueItem; summary: string; onCopyToQueue?: () => void }) {
   const cls = planColor(item.name);
   const exitStatus = item.result?.exit_status ?? item.status ?? '';
   const stopTime = formatDateTime(item.result?.time_stop);
@@ -215,9 +300,7 @@ function HistoryCard({ item, onCopyToQueue }: { item: QueueItem; onCopyToQueue?:
           title="Copy to queue"
         >⧉</button>
       </div>
-      {Object.keys(item.kwargs ?? {}).length > 0 && (
-        <p className="text-gray-500 mt-0.5 truncate">{kwargsSummary(item.kwargs)}</p>
-      )}
+      {summary && <p className="text-gray-500 mt-0.5 truncate">{summary}</p>}
     </div>
   );
 }
@@ -517,7 +600,7 @@ setReRuns(runs ?? null);
 
   const handleCopyToQueue = async (item: QueueItem) => {
     try {
-      await api('/api/queue/item/add', { item: { item_type: 'plan', name: item.name, kwargs: item.kwargs } });
+      await api('/api/queue/item/add', { item: { item_type: 'plan', name: item.name, args: item.args ?? [], kwargs: item.kwargs } });
       refresh();
     } catch (e) { console.error(e); }
   };
@@ -529,7 +612,7 @@ setReRuns(runs ?? null);
         item.result?.time_start != null ? new Date(item.result.time_start * 1000).toLocaleString() : '',
         item.result?.time_stop != null ? new Date(item.result.time_stop * 1000).toLocaleString() : '',
         item.name,
-        kwargsSummary(item.kwargs),
+        itemSummary(item, allowedPlans),
         item.result?.exit_status ?? item.status ?? '',
         (item.result?.scan_ids ?? []).join(';'),
         (item.result?.run_uids ?? []).join(';'),
@@ -549,15 +632,12 @@ setReRuns(runs ?? null);
     setSubmitMsg(''); setSubmitError('');
     const plan = allowedPlans.find(p => p.name === selectedPlan);
     if (!plan) return;
-    const kwargs: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(paramValues)) {
-      const parsed = parseParamValue(v);
-      if (parsed !== undefined) kwargs[k] = parsed;
-    }
+    const { args, kwargs } = buildArgsKwargs(paramValues, plan);
     try {
       const res = await api('/api/queue/item/add', {
-        item: { item_type: 'plan', name: selectedPlan, kwargs },
+        item: { item_type: 'plan', name: selectedPlan, args, kwargs },
       });
+      if (res.success === false) { setSubmitError(res.msg ?? 'QServer rejected the item'); return; }
       setSubmitMsg(`Added: ${res.item?.item_uid?.slice(0, 8) ?? 'ok'}`);
       refresh();
     } catch (e) { setSubmitError(String(e)); }
@@ -567,24 +647,19 @@ setReRuns(runs ?? null);
     setSubmitMsg(''); setSubmitError('');
     setEditingItem(item);
     setSelectedPlan(item.name);
-    const vals: Record<string, string> = {};
-    for (const [k, v] of Object.entries(item.kwargs ?? {})) {
-      vals[k] = typeof v === 'string' ? v : JSON.stringify(v);
-    }
-    setParamValues(vals);
+    const plan = allowedPlans.find(p => p.name === item.name);
+    setParamValues(itemToParamValues(item, plan));
   };
 
   const handleUpdateQueue = async () => {
     if (!editingItem) return;
     setSubmitMsg(''); setSubmitError('');
-    const kwargs: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(paramValues)) {
-      const parsed = parseParamValue(v);
-      if (parsed !== undefined) kwargs[k] = parsed;
-    }
+    const plan = allowedPlans.find(p => p.name === selectedPlan);
+    if (!plan) return;
+    const { args, kwargs } = buildArgsKwargs(paramValues, plan);
     try {
       await api('/api/queue/item/update', {
-        item: { item_type: 'plan', name: selectedPlan, kwargs, item_uid: editingItem.item_uid },
+        item: { item_type: 'plan', name: selectedPlan, args, kwargs, item_uid: editingItem.item_uid },
       });
       setEditingItem(null);
       refresh();
@@ -595,14 +670,10 @@ setReRuns(runs ?? null);
     setSubmitMsg(''); setSubmitError('');
     const plan = allowedPlans.find(p => p.name === selectedPlan);
     if (!plan) return;
-    const kwargs: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(paramValues)) {
-      const parsed = parseParamValue(v);
-      if (parsed !== undefined) kwargs[k] = parsed;
-    }
+    const { args, kwargs } = buildArgsKwargs(paramValues, plan);
     try {
       await api('/api/queue/item/execute', {
-        item: { item_type: 'plan', name: selectedPlan, kwargs },
+        item: { item_type: 'plan', name: selectedPlan, args, kwargs },
       });
       setSubmitMsg('Executing…');
       refresh();
@@ -843,7 +914,7 @@ setReRuns(runs ?? null);
             }}
           >
             {runningItem && (
-              <QueueCard item={runningItem} running key={runningItem.item_uid} onDelete={() => {}} />
+              <QueueCard item={runningItem} summary={itemSummary(runningItem, allowedPlans)} running key={runningItem.item_uid} onDelete={() => {}} />
             )}
             {queue.map((item, idx) => (
               <div
@@ -869,6 +940,7 @@ setReRuns(runs ?? null);
                 />
                 <QueueCard
                   item={item}
+                  summary={itemSummary(item, allowedPlans)}
                   running={false}
                   selected={selectedUids.has(item.item_uid)}
                   onSelect={e => handleSelect(item.item_uid, e)}
@@ -939,7 +1011,7 @@ setReRuns(runs ?? null);
           </div>
           <div className="flex-1 overflow-y-auto p-2 space-y-1.5 min-h-0">
             {history.map(item => (
-              <HistoryCard key={item.item_uid} item={item} onCopyToQueue={() => handleCopyToQueue(item)} />
+              <HistoryCard key={item.item_uid} item={item} summary={itemSummary(item, allowedPlans)} onCopyToQueue={() => handleCopyToQueue(item)} />
             ))}
             {history.length === 0 && (
               <p className="text-xs text-gray-400 text-center py-4">No history</p>
