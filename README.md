@@ -2,11 +2,9 @@
 
 A browser-based visualization tool for [Tiled](https://blueskyproject.io/tiled/) datasets.
 
-BCDA, Advanced Photon Source, Argonne National Laboratory
-
-| CI/CD | Coverage | License |
-|-------|----------|---------|
-| [![CI](https://github.com/BCDA-APS/webviz/actions/workflows/ci.yml/badge.svg)](https://github.com/BCDA-APS/webviz/actions/workflows/ci.yml) | [![codecov](https://codecov.io/gh/BCDA-APS/webviz/branch/main/graph/badge.svg)](https://codecov.io/gh/BCDA-APS/webviz) | [![License](https://img.shields.io/badge/License-ANL-blue)](LICENSE) |
+| CI/CD | Coverage | Documentation | License |
+|-------|----------|---------------|---------|
+| [![CI](https://github.com/BCDA-APS/webviz/actions/workflows/ci.yml/badge.svg)](https://github.com/BCDA-APS/webviz/actions/workflows/ci.yml) | [![codecov](https://codecov.io/gh/BCDA-APS/webviz/branch/main/graph/badge.svg)](https://codecov.io/gh/BCDA-APS/webviz) | [![docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://bcda-aps.github.io/webviz/) | [![License](https://img.shields.io/badge/License-ANL-blue)](LICENSE) |
 
 ## Installation
 
