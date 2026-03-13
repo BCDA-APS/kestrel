@@ -155,6 +155,23 @@ export default function RunDataTab({ serverUrl, catalog, runId }: Props) {
   const thCls = 'sticky top-0 z-10 px-3 py-1.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide bg-gray-50 border-b border-gray-200 whitespace-nowrap';
   const tdCls = 'px-3 py-1 text-xs text-gray-700 border-b border-gray-100 whitespace-nowrap font-mono';
 
+  const handleExportCsv = () => {
+    const header = columns.join(',');
+    const rows = Array.from({ length: nRows }, (_, i) =>
+      columns.map(col => {
+        const v = (data[col] as unknown[])[i];
+        const s = String(v ?? '');
+        return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+      }).join(',')
+    );
+    const csv = [header, ...rows].join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = `${runId}_${activeStream}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Stream selector */}
@@ -191,8 +208,12 @@ export default function RunDataTab({ serverUrl, catalog, runId }: Props) {
         )}
         {!loading && !error && columns.length > 0 && (
           <>
-            <div className="px-3 py-1.5 text-xs text-gray-400 bg-white border-b border-gray-100 sticky top-0 z-20">
-              {nRows} rows · {columns.length} columns
+            <div className="flex items-center justify-between px-3 py-1.5 bg-white border-b border-gray-100 sticky top-0 z-20">
+              <span className="text-xs text-gray-400">{nRows} rows · {columns.length} columns</span>
+              <button
+                onClick={handleExportCsv}
+                className="text-xs bg-sky-600 hover:bg-sky-500 text-white px-3 py-1 rounded font-medium transition-colors"
+              >Export CSV</button>
             </div>
             <table className="w-full border-collapse">
               <thead>
