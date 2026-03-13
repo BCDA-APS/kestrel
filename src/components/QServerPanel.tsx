@@ -25,6 +25,15 @@ type AllowedPlan = {
   parameters?: PlanParam[];
 };
 
+type AllowedDevice = {
+  classname?: string;
+  module?: string;
+  is_readable: boolean;
+  is_movable: boolean;
+  is_flyable: boolean;
+  components?: Record<string, AllowedDevice>;
+};
+
 type RERunInfo = {
   uid: string;
   scan_id?: number;
@@ -133,14 +142,21 @@ function buildArgsKwargs(paramValues: Record<string, string>, plan: AllowedPlan)
     if (raw === undefined) continue;
     const parsed = parseParamValue(raw);
     if (parsed === undefined || parsed === null) continue; // omit None — QServer uses its own default
+    // Auto-wrap into array for List/Sequence parameters when user typed a plain string
+    const isListType = isListAnnotation(param.annotation?.type ?? '');
+    const finalParsed = isListType && !Array.isArray(parsed) && typeof parsed === 'string'
+      ? parsed.split(',').map(s => s.trim()).filter(Boolean)
+      : parsed;
 
     if (param.kind.name === 'VAR_POSITIONAL') {
-      if (Array.isArray(parsed)) varArgs.push(...parsed);
+      if (!Array.isArray(finalParsed))
+        throw new Error(`"${param.name}" must be a valid JSON array (e.g. ["m1", -1, 1])`);
+      varArgs.push(...finalParsed);
     } else if (param.kind.name === 'POSITIONAL_OR_KEYWORD' && varPosIdx >= 0 && i < varPosIdx) {
       // Must be positional when there is a *args in the plan
-      posArgs.push(parsed);
+      posArgs.push(finalParsed);
     } else {
-      kwargs[param.name] = parsed;
+      kwargs[param.name] = finalParsed;
     }
   }
   return { args: [...posArgs, ...varArgs], kwargs };
@@ -306,6 +322,46 @@ function HistoryCard({ item, summary, onCopyToQueue }: { item: QueueItem; summar
   );
 }
 
+// ─── Device param helpers ─────────────────────────────────────────────────────
+
+type DeviceKind = 'movable' | 'readable' | 'flyable' | 'any';
+
+/** Return the device capability filter implied by an annotation type string, or null if not a device param. */
+function deviceKindFromAnnotation(typeName: string): DeviceKind | null {
+  if (!typeName) return null;
+  // Strip List/Sequence/Optional wrappers (typing. and collections.abc. variants)
+  const inner = typeName
+    .replace(/(typing\.|collections\.abc\.)(List|Sequence|Iterable|Optional|Union)\[/g, '')
+    .replace(/\]/g, '');
+  if (/Motor|Movable|Positioner/i.test(inner)) return 'movable';
+  if (/Detector|Readable/i.test(inner)) return 'readable';
+  if (/Flyable/i.test(inner)) return 'flyable';
+  if (/Device|ophyd\./i.test(inner)) return 'any';
+  return null;
+}
+
+/** Return true if the annotation type is a List/Sequence of something. */
+function isListAnnotation(typeName: string): boolean {
+  return /(typing\.|collections\.abc\.)(List|Sequence|Iterable)\[/.test(typeName);
+}
+
+/** Return true if the annotation type is a List/Sequence of devices. */
+function isListDeviceParam(typeName: string): boolean {
+  return isListAnnotation(typeName) && deviceKindFromAnnotation(typeName) !== null;
+}
+
+function filterDevices(devices: Record<string, AllowedDevice>, kind: DeviceKind): string[] {
+  return Object.entries(devices)
+    .filter(([, d]) =>
+      kind === 'movable' ? d.is_movable :
+      kind === 'readable' ? d.is_readable :
+      kind === 'flyable' ? d.is_flyable :
+      true
+    )
+    .map(([name]) => name)
+    .sort();
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function QServerPanel({ proxyUrl, serverUrl: _serverUrl, onStatusChange }: {
@@ -319,6 +375,7 @@ export default function QServerPanel({ proxyUrl, serverUrl: _serverUrl, onStatus
   const [runningItem, setRunningItem] = useState<QueueItem | null>(null);
   const [history, setHistory] = useState<QueueItem[]>([]);
   const [allowedPlans, setAllowedPlans] = useState<AllowedPlan[]>([]);
+  const [allowedDevices, setAllowedDevices] = useState<Record<string, AllowedDevice>>({});
   const [authError, setAuthError] = useState(false);
 
   // Add / edit item form
@@ -439,7 +496,7 @@ export default function QServerPanel({ proxyUrl, serverUrl: _serverUrl, onStatus
     return () => clearInterval(id);
   }, [refresh, authError]);
 
-  // ── Allowed plans ────────────────────────────────────────────────────────
+  // ── Allowed plans + devices ───────────────────────────────────────────────
   useEffect(() => {
     api('/api/plans/allowed')
       .then(j => {
@@ -450,6 +507,9 @@ export default function QServerPanel({ proxyUrl, serverUrl: _serverUrl, onStatus
         setAllowedPlans(plans);
         if (plans.length > 0 && !selectedPlan) setSelectedPlan(plans[0].name);
       })
+      .catch(() => {});
+    api('/api/devices/allowed')
+      .then(j => setAllowedDevices((j.devices_allowed ?? {}) as Record<string, AllowedDevice>))
       .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proxyUrl]);
@@ -631,7 +691,9 @@ export default function QServerPanel({ proxyUrl, serverUrl: _serverUrl, onStatus
     setSubmitMsg(''); setSubmitError('');
     const plan = allowedPlans.find(p => p.name === selectedPlan);
     if (!plan) return;
-    const { args, kwargs } = buildArgsKwargs(paramValues, plan);
+    let args: unknown[], kwargs: Record<string, unknown>;
+    try { ({ args, kwargs } = buildArgsKwargs(paramValues, plan)); }
+    catch (e) { setSubmitError(String(e)); return; }
     try {
       const res = await api('/api/queue/item/add', {
         item: { item_type: 'plan', name: selectedPlan, args, kwargs },
@@ -655,7 +717,9 @@ export default function QServerPanel({ proxyUrl, serverUrl: _serverUrl, onStatus
     setSubmitMsg(''); setSubmitError('');
     const plan = allowedPlans.find(p => p.name === selectedPlan);
     if (!plan) return;
-    const { args, kwargs } = buildArgsKwargs(paramValues, plan);
+    let args: unknown[], kwargs: Record<string, unknown>;
+    try { ({ args, kwargs } = buildArgsKwargs(paramValues, plan)); }
+    catch (e) { setSubmitError(String(e)); return; }
     try {
       await api('/api/queue/item/update', {
         item: { item_type: 'plan', name: selectedPlan, args, kwargs, item_uid: editingItem.item_uid },
@@ -675,7 +739,7 @@ export default function QServerPanel({ proxyUrl, serverUrl: _serverUrl, onStatus
 
   const handleDuplicate = async (item: QueueItem) => {
     try {
-      await api('/api/queue/item/add', { item: { item_type: 'plan', name: item.name, kwargs: item.kwargs } });
+      await api('/api/queue/item/add', { item: { item_type: 'plan', name: item.name, args: item.args, kwargs: item.kwargs } });
       refresh();
     } catch (e) { console.error(e); }
   };
@@ -1162,8 +1226,8 @@ export default function QServerPanel({ proxyUrl, serverUrl: _serverUrl, onStatus
                     >Add to Queue</button>
                   )}
                   {submitMsg && <span className="text-xs text-green-600 shrink-0">{submitMsg}</span>}
-                  {submitError && <span className="text-xs text-red-500 shrink-0">{submitError}</span>}
                 </div>
+                {submitError && <p className="text-xs text-red-500 pl-[5.5rem] leading-relaxed break-words">{submitError}</p>}
 
                 {/* Plan description */}
                 {activePlan?.description && (
@@ -1174,6 +1238,10 @@ export default function QServerPanel({ proxyUrl, serverUrl: _serverUrl, onStatus
                 {(activePlan?.parameters ?? []).map(param => {
                   const typeName = param.annotation?.type ?? '';
                   const hasDefault = param.default !== undefined && param.default !== 'no_default';
+                  const devKind = deviceKindFromAnnotation(typeName);
+                  const isList = isListDeviceParam(typeName);
+                  const devOptions = devKind ? filterDevices(allowedDevices, devKind) : [];
+                  const shortType = typeName.replace(/typing\.[A-Za-z]+\[/g, '').replace(/\]/g, '').replace(/ophyd\.[^.]+\./g, '').replace('ophyd.', '');
                   return (
                     <div key={param.name} className="flex items-center gap-3">
                       <label
@@ -1184,15 +1252,63 @@ export default function QServerPanel({ proxyUrl, serverUrl: _serverUrl, onStatus
                         {!hasDefault && <span className="text-red-400 ml-0.5">*</span>}
                       </label>
                       <div className="flex-1 flex items-center gap-2">
-                        <input
-                          className="flex-1 text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-sky-400 font-mono"
-                          value={paramValues[param.name] ?? ''}
-                          onChange={e => setParamValues(prev => ({ ...prev, [param.name]: e.target.value }))}
-                          placeholder={hasDefault ? String(param.default) : typeName || 'value'}
-                        />
+                        {devKind && !isList && devOptions.length > 0 && param.kind.name !== 'VAR_POSITIONAL' ? (
+                          /* Single device → select dropdown */
+                          <select
+                            className="flex-1 text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-sky-400 font-mono bg-white"
+                            value={paramValues[param.name] ?? ''}
+                            onChange={e => setParamValues(prev => ({ ...prev, [param.name]: e.target.value }))}
+                          >
+                            {hasDefault && <option value="">(default: {String(param.default)})</option>}
+                            {!hasDefault && <option value="">— select —</option>}
+                            {devOptions.map(d => <option key={d} value={d}>{d}</option>)}
+                          </select>
+                        ) : devKind && isList && devOptions.length > 0 && param.kind.name !== 'VAR_POSITIONAL' ? (
+                          /* List of devices → chip input */
+                          (() => {
+                            const chips: string[] = (() => {
+                              try { const v = JSON.parse(paramValues[param.name] ?? '[]'); return Array.isArray(v) ? v : [String(v)]; }
+                              catch { return (paramValues[param.name] ?? '').split(',').map(s => s.trim()).filter(Boolean); }
+                            })();
+                            const removeChip = (d: string) => setParamValues(prev => ({ ...prev, [param.name]: JSON.stringify(chips.filter(c => c !== d)) }));
+                            const addChip = (d: string) => { if (d && !chips.includes(d)) setParamValues(prev => ({ ...prev, [param.name]: JSON.stringify([...chips, d]) })); };
+                            return (
+                              <div className="flex-1 flex flex-col gap-1">
+                                <div className="flex flex-wrap gap-1 min-h-[26px] border border-gray-200 rounded px-1.5 py-1 bg-white">
+                                  {chips.map(d => (
+                                    <span key={d} className="inline-flex items-center gap-0.5 bg-sky-100 text-sky-700 text-xs px-1.5 py-0.5 rounded font-mono">
+                                      {d}
+                                      <button type="button" onClick={() => removeChip(d)} className="text-sky-400 hover:text-sky-700 leading-none font-bold ml-0.5">×</button>
+                                    </span>
+                                  ))}
+                                  <select
+                                    className="text-xs text-gray-400 border-none outline-none bg-transparent flex-1 min-w-[80px]"
+                                    value=""
+                                    onChange={e => { addChip(e.target.value); e.target.value = ''; }}
+                                  >
+                                    <option value="">+ add…</option>
+                                    {devOptions.filter(d => !chips.includes(d)).map(d => <option key={d} value={d}>{d}</option>)}
+                                  </select>
+                                </div>
+                              </div>
+                            );
+                          })()
+                        ) : (
+                          /* Scalar / VAR_POSITIONAL / unknown type → plain text input */
+                          <input
+                            className="flex-1 text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-sky-400 font-mono"
+                            value={paramValues[param.name] ?? ''}
+                            onChange={e => setParamValues(prev => ({ ...prev, [param.name]: e.target.value }))}
+                            placeholder={
+                              param.kind.name === 'VAR_POSITIONAL' ? '[val1, val2, …]' :
+                              hasDefault ? String(param.default) :
+                              typeName || 'value'
+                            }
+                          />
+                        )}
                         {typeName && (
                           <span className="text-[10px] text-gray-400 shrink-0 max-w-[120px] truncate" title={typeName}>
-                            {typeName.replace(/typing\.|ophyd\.[^.]+\./g, '').replace('typing.', '')}
+                            {shortType}
                           </span>
                         )}
                       </div>
