@@ -5,6 +5,7 @@ import { type RGB, COLORMAPS, interpolateColor } from '../utils/colormap';
 // PlotlyScatter internal margins (from finch source) — keep in sync to align canvas with plots
 // l=60 (y-title present), r=30, t=30, b=70 + pb-4 wrapper (16px) = 86
 const PLOT_T = 30, PLOT_B = 86, PLOT_L = 60, PLOT_R = 30;
+const TITLE_FONT = { size: 12, color: '#7f7f7f' };
 
 type Props = {
   serverUrl: string;
@@ -24,6 +25,77 @@ type DragState =
   | { mode: 'select'; sx: number; sy: number; cRect: DOMRect; moved: boolean };
 
 const catSeg = (c: string | null) => c ? `/${c}` : '';
+
+function formatTick(v: number): string {
+  if (v === 0) return '0';
+  const abs = Math.abs(v);
+  if (abs >= 10000 || abs < 0.001) return v.toExponential(2);
+  return parseFloat(v.toPrecision(4)).toString();
+}
+
+function drawTicks(
+  canvas: HTMLCanvasElement,
+  vp: Viewport,
+  H: number,
+  W: number,
+  colorFn?: (t: number) => RGB,
+  zMin?: number,
+  zMax?: number,
+) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.width / dpr;
+  const h = canvas.height / dpr;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const plotW = w - PLOT_L - PLOT_R;
+  const plotH = h - PLOT_T - PLOT_B;
+  if (plotW <= 0 || plotH <= 0) return;
+  ctx.save();
+  ctx.scale(dpr, dpr);
+  ctx.fillStyle = '#4b5563';
+  ctx.strokeStyle = '#9ca3af';
+  ctx.font = '12px system-ui, sans-serif';
+  ctx.lineWidth = 1;
+  const N = 5;
+  for (let i = 0; i <= N; i++) {
+    const frac = i / N;
+    // X tick (col index)
+    const colIdx = Math.max(0, Math.min(W - 1, Math.round(vp.c0 + frac * (vp.c1 - vp.c0))));
+    const px = PLOT_L + frac * plotW;
+    ctx.beginPath(); ctx.moveTo(px, h - PLOT_B); ctx.lineTo(px, h - PLOT_B + 5); ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.fillText(String(colIdx), px, h - PLOT_B + 16);
+    // Y tick (row index, not flipped — row 0 at top)
+    const rowIdx = Math.max(0, Math.min(H - 1, Math.round(vp.r0 + frac * (vp.r1 - vp.r0))));
+    const py = PLOT_T + frac * plotH;
+    ctx.beginPath(); ctx.moveTo(PLOT_L, py); ctx.lineTo(PLOT_L - 5, py); ctx.stroke();
+    ctx.textAlign = 'right';
+    ctx.fillText(String(rowIdx), PLOT_L - 7, py + 3.5);
+  }
+  // Colorbar in bottom margin
+  if (colorFn && zMin !== undefined && zMax !== undefined && isFinite(zMin) && isFinite(zMax) && plotW > 0) {
+    const barY = h - PLOT_B + 40, barH = 13;
+    for (let px = 0; px < Math.ceil(plotW); px++) {
+      const [r, g, b] = colorFn(px / (plotW - 1));
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(PLOT_L + px, barY, 1, barH);
+    }
+    ctx.strokeStyle = '#d1d5db'; ctx.lineWidth = 0.5;
+    ctx.strokeRect(PLOT_L, barY, plotW, barH);
+    ctx.strokeStyle = '#9ca3af'; ctx.lineWidth = 1;
+    ctx.fillStyle = '#4b5563';
+    const NB = 5;
+    for (let i = 0; i <= NB; i++) {
+      const frac = i / NB;
+      const px = PLOT_L + frac * plotW;
+      ctx.beginPath(); ctx.moveTo(px, barY + barH); ctx.lineTo(px, barY + barH + 3); ctx.stroke();
+      ctx.textAlign = i === 0 ? 'left' : i === NB ? 'right' : 'center';
+      ctx.fillText(formatTick(zMin + frac * (zMax - zMin)), px, barY + barH + 14);
+    }
+  }
+  ctx.restore();
+}
 
 function drawFrame(
   canvas: HTMLCanvasElement,
@@ -97,6 +169,7 @@ export default function ImagePanel({ serverUrl, catalog, runId, stream, dataSubN
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const ticksCanvasRef = useRef<HTMLCanvasElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const vpRef = useRef<Viewport>({ r0: 0, r1: H, c0: 0, c1: W });
   const dragRef = useRef<DragState | null>(null);
@@ -175,8 +248,11 @@ export default function ImagePanel({ serverUrl, catalog, runId, stream, dataSubN
     const canvas = canvasRef.current;
     if (!canvas || !currentFrame) return;
     const palette = COLORMAPS[colormap] ?? COLORMAPS.viridis;
-    drawFrame(canvas, currentFrame, crossRow, crossCol, vpRef.current, t => interpolateColor(palette, t));
-  }, [currentFrame, crossRow, crossCol, viewport, colormap]);
+    const colorFn = (t: number) => interpolateColor(palette, t);
+    drawFrame(canvas, currentFrame, crossRow, crossCol, vpRef.current, colorFn);
+    const tc = ticksCanvasRef.current;
+    if (tc) drawTicks(tc, vpRef.current, H, W, colorFn, zMin, zMax);
+  }, [currentFrame, crossRow, crossCol, viewport, colormap, H, W, zMin, zMax]);
 
   // Resize observer
   useEffect(() => {
@@ -186,15 +262,23 @@ export default function ImagePanel({ serverUrl, catalog, runId, stream, dataSubN
     const obs = new ResizeObserver(() => {
       canvas.width = container.clientWidth;
       canvas.height = container.clientHeight;
+      const tc = ticksCanvasRef.current;
+      if (tc) {
+        const dpr = window.devicePixelRatio || 1;
+        tc.width = (container.clientWidth + PLOT_L + PLOT_R) * dpr;
+        tc.height = (container.clientHeight + PLOT_T + PLOT_B) * dpr;
+      }
       const frame = frameCache.get(frameIdx);
       if (frame) {
         const palette = COLORMAPS[colormap] ?? COLORMAPS.viridis;
-        drawFrame(canvas, frame, crossRow, crossCol, vpRef.current, t => interpolateColor(palette, t));
+        const colorFn = (t: number) => interpolateColor(palette, t);
+        drawFrame(canvas, frame, crossRow, crossCol, vpRef.current, colorFn);
+        if (tc) drawTicks(tc, vpRef.current, H, W, colorFn, zMin, zMax);
       }
     });
     obs.observe(container);
     return () => obs.disconnect();
-  }, [frameCache, frameIdx, colormap, crossRow, crossCol]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [frameCache, frameIdx, colormap, crossRow, crossCol, H, W, zMin, zMax]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Split drag
   useEffect(() => {
@@ -375,6 +459,13 @@ export default function ImagePanel({ serverUrl, catalog, runId, stream, dataSubN
 
           {/* Image canvas — outer div is full-size; inner div is inset to match PlotlyScatter margins */}
           <div className="relative bg-white rounded overflow-hidden border border-gray-200" style={{ width: `${colSplit}%` }}>
+            {/* Ticks + colorbar overlay */}
+            <canvas ref={ticksCanvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
+            {/* Axis title labels */}
+            <div className="absolute top-0 left-0 right-0 text-center text-[12px] font-medium text-gray-500 pt-1 pointer-events-none">col</div>
+            <div className="absolute top-0 bottom-0 left-0 flex items-center justify-center pointer-events-none" style={{ width: PLOT_L }}>
+              <span className="text-[12px] font-medium text-gray-500 whitespace-nowrap" style={{ transform: 'translateX(-10px) rotate(-90deg)' }}>row</span>
+            </div>
             <div ref={containerRef} className="absolute"
                  style={{ top: PLOT_T, bottom: PLOT_B, left: PLOT_L, right: PLOT_R }}>
               <canvas
@@ -424,6 +515,8 @@ export default function ImagePanel({ serverUrl, catalog, runId, stream, dataSubN
                   xAxisTitle={fieldName}
                   yAxisTitle="row"
                   yAxisRange={vertCutYRange}
+                  xAxisLayout={{ title: { text: fieldName, font: TITLE_FONT } }}
+                  yAxisLayout={{ title: { text: 'row', font: TITLE_FONT } }}
                   className="w-full h-full"
                 />
                 {onAnalyzeCut && (
@@ -462,6 +555,8 @@ export default function ImagePanel({ serverUrl, catalog, runId, stream, dataSubN
                   xAxisTitle="col"
                   yAxisTitle={fieldName}
                   xAxisRange={horizCutXRange}
+                  xAxisLayout={{ title: { text: 'col', font: TITLE_FONT } }}
+                  yAxisLayout={{ title: { text: fieldName, font: TITLE_FONT } }}
                   className="w-full h-full"
                 />
                 {onAnalyzeCut && (
@@ -482,12 +577,14 @@ export default function ImagePanel({ serverUrl, catalog, runId, stream, dataSubN
 
           {/* Info */}
           <div className="bg-gray-50 rounded border border-gray-200 flex-1 flex items-center justify-center">
-            <div className="text-xs text-gray-400 text-center px-3 font-sans">
+            <div className="flex flex-col items-center gap-2 text-xs text-gray-400 px-3">
               <p className="font-medium text-gray-500">{fieldName}</p>
-              <p className="mt-1">{H} rows × {W} cols{nFrames > 1 ? ` · frame ${frameIdx + 1}/${nFrames}` : ''}</p>
-              <p className="mt-1 font-mono">
-                z: [{zMin === Infinity ? '—' : zMin.toPrecision(4)}, {zMax === -Infinity ? '—' : zMax.toPrecision(4)}]
-              </p>
+              <p>{H} × {W}{nFrames > 1 ? ` · ${nFrames}f` : ''}</p>
+              {currentFrame && (
+                <p className="font-mono text-[10px] text-gray-500 text-center">
+                  [{zMin === Infinity ? '—' : formatTick(zMin)}, {zMax === -Infinity ? '—' : formatTick(zMax)}]
+                </p>
+              )}
             </div>
           </div>
         </div>

@@ -206,6 +206,7 @@ export default function App() {
   const settingsRef = useRef<HTMLDivElement>(null);
   const qserverEnabled = settings.qserverEnabled !== false;
   const isGridScan = selectedRunHintsDimensions !== null && selectedRunHintsDimensions.length === 2;
+  const analysisDisabled = imageState !== null || (isGridScan && (showGridHeatmap || showGrid1D));
   const updateSetting = <K extends keyof typeof settings>(key: K, val: (typeof settings)[K]) => {
     const next = { ...settings, [key]: val };
     setSettings(next);
@@ -1216,7 +1217,7 @@ export default function App() {
 
             {/* Analysis panel right */}
             <aside
-              className="flex-none bg-white overflow-hidden flex flex-col border-l border-gray-100"
+              className={`flex-none bg-white overflow-hidden flex flex-col border-l border-gray-100 transition-opacity${analysisDisabled ? ' opacity-40 pointer-events-none' : ''}`}
               style={{ width: analysisCollapsed ? 0 : analysisWidth }}
             >
               <AnalysisPanel
@@ -1323,7 +1324,7 @@ export default function App() {
 
             {/* Analysis panel bottom */}
             <aside
-              className="flex-none bg-white overflow-hidden flex flex-col border-t border-gray-100"
+              className={`flex-none bg-white overflow-hidden flex flex-col border-t border-gray-100 transition-opacity${analysisDisabled ? ' opacity-40 pointer-events-none' : ''}`}
               style={{ height: analysisCollapsed ? 0 : analysisHeight }}
             >
               <AnalysisPanel

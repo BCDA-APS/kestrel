@@ -606,7 +606,7 @@ export default function GridScanPanel({ serverUrl, catalog, runId, shape, dimens
                   xAxisTitle={effectiveZField}
                   yAxisTitle={slowMotor}
                   yAxisRange={vertCutYRange}
-                  xAxisLayout={{ side: 'top', title: { text: effectiveZField, font: TITLE_FONT } }}
+                  xAxisLayout={{ title: { text: effectiveZField, font: TITLE_FONT } }}
                   yAxisLayout={{ title: { text: slowMotor, font: TITLE_FONT } }}
                   className="w-full h-full"
                 />
