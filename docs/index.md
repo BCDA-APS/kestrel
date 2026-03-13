@@ -1,6 +1,6 @@
-# webviz
+# Kestrel
 
-**webviz** is a browser-based visualization tool for [Tiled](https://blueskyproject.io/tiled/) datasets produced by [Bluesky](https://blueskyproject.io/).
+**Kestrel** is a browser-based visualization tool for [Tiled](https://blueskyproject.io/tiled/) datasets produced by [Bluesky](https://blueskyproject.io/).
 
 BCDA, Advanced Photon Source, Argonne National Laboratory
 
@@ -21,10 +21,10 @@ BCDA, Advanced Photon Source, Argonne National Laboratory
 ## Quick Start
 
 ```bash
-conda create -n webviz nodejs
-conda activate webviz
-git clone https://github.com/BCDA-APS/webviz.git
-cd webviz
+conda create -n kestrel nodejs
+conda activate kestrel
+git clone https://github.com/BCDA-APS/kestrel.git
+cd kestrel
 npm install
 npm run dev
 ```

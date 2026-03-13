@@ -193,5 +193,5 @@ app.get('*', (_req, res) => {
 });
 
 http.createServer(app).listen(PORT, () => {
-  console.log(`webviz running at http://localhost:${PORT}`);
+  console.log(`Kestrel running at http://localhost:${PORT}`);
 });

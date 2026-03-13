@@ -1,9 +1,9 @@
-site_name: webviz
-site_url: https://bcda-aps.github.io/webviz/
+site_name: Kestrel
+site_url: https://bcda-aps.github.io/kestrel/
 site_description: Browser-based visualization tool for Bluesky/Tiled datasets
 site_author: BCDA, Advanced Photon Source, Argonne National Laboratory
-repo_url: https://github.com/BCDA-APS/webviz
-repo_name: BCDA-APS/webviz
+repo_url: https://github.com/BCDA-APS/kestrel
+repo_name: BCDA-APS/kestrel
 
 theme:
   name: material

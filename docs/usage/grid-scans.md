@@ -1,6 +1,6 @@
 # Grid Scans
 
-When a run was collected with a 2D grid scan plan (e.g. `grid_scan`), webviz automatically detects this from the run's `start.shape` and `start.hints.dimensions` metadata and shows an interactive heatmap in the **Graph** tab.
+When a run was collected with a 2D grid scan plan (e.g. `grid_scan`), Kestrel automatically detects this from the run's `start.shape` and `start.hints.dimensions` metadata and shows an interactive heatmap in the **Graph** tab.
 
 ## Heatmap controls
 

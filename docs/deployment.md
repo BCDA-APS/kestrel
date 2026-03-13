@@ -2,7 +2,7 @@
 
 ## Overview
 
-Webviz is a static web app. The build step (requires Node.js) produces a `dist/` folder of plain HTML/JS/CSS files. These files can be served from APSshare so all beamlines share a single deployment — updating the files on APSshare instantly rolls out to all beamlines.
+Kestrel is a static web app. The build step (requires Node.js) produces a `dist/` folder of plain HTML/JS/CSS files. These files can be served from APSshare so all beamlines share a single deployment — updating the files on APSshare instantly rolls out to all beamlines.
 
 ---
 
@@ -13,19 +13,19 @@ Webviz is a static web app. The build step (requires Node.js) produces a `dist/`
 Node.js is required only for building, not for serving. Use conda:
 
 ```bash
-conda create -n webviz nodejs
-conda activate webviz
+conda create -n kestrel nodejs
+conda activate kestrel
 npm install
 ```
 
 ### 2. Place the launcher script on APSshare
 
-Save the following as `/APSshare/bin/webviz` and make it executable (`chmod +x /APSshare/bin/webviz`):
+Save the following as `/APSshare/bin/kestrel` and make it executable (`chmod +x /APSshare/bin/kestrel`):
 
 ```bash
 #!/bin/bash
-DIST="/APSshare/webviz/dist"
-PIDFILE="/tmp/webviz-$USER.pid"
+DIST="/APSshare/kestrel/dist"
+PIDFILE="/tmp/kestrel-$USER.pid"
 
 # Kill previous instance if running
 if [ -f "$PIDFILE" ]; then
@@ -51,12 +51,12 @@ xdg-open "http://localhost:$PORT"
 On your development machine:
 
 ```bash
-conda activate webviz
+conda activate kestrel
 npm run build
-cp -r dist/ /APSshare/webviz/dist/
+cp -r dist/ /APSshare/kestrel/dist/
 ```
 
-That's it — all beamlines get the update the next time they run `webviz`.
+That's it — all beamlines get the update the next time they run `kestrel`.
 
 ---
 
@@ -65,7 +65,7 @@ That's it — all beamlines get the update the next time they run `webviz`.
 Run from any terminal:
 
 ```bash
-webviz
+kestrel
 ```
 
 This opens a browser with the app. No conda activation or directory navigation required. On first use, enter your Tiled server address — it will be remembered for future sessions.

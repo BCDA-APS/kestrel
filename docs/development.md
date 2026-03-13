@@ -3,7 +3,7 @@
 ## Setup
 
 ```bash
-conda activate webviz
+conda activate kestrel
 npm install
 npm run dev
 ```

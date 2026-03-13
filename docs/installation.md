@@ -10,15 +10,15 @@
 ### 1. Create a conda environment with Node.js
 
 ```bash
-conda create -n webviz nodejs
-conda activate webviz
+conda create -n kestrel nodejs
+conda activate kestrel
 ```
 
 ### 2. Clone and install dependencies
 
 ```bash
-git clone https://github.com/BCDA-APS/webviz.git
-cd webviz
+git clone https://github.com/BCDA-APS/kestrel.git
+cd kestrel
 npm install
 ```
 
