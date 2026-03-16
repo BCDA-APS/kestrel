@@ -2,10 +2,10 @@
 FROM registry.access.redhat.com/ubi9/nodejs-20 AS build
 WORKDIR /opt/app-root/src
 
-COPY package*.json ./
+COPY --chown=1001:0 package*.json ./
 RUN npm ci
 
-COPY . .
+COPY --chown=1001:0 . .
 RUN npm run build
 
 # Keep only production deps for runtime
@@ -23,5 +23,6 @@ COPY --from=build /opt/app-root/src/server.mjs ./
 COPY --from=build /opt/app-root/src/dist ./dist
 COPY --from=build /opt/app-root/src/node_modules ./node_modules
 
+USER 1001
 EXPOSE 4173
 CMD ["node", "server.mjs"]
