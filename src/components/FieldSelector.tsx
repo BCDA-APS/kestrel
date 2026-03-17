@@ -46,6 +46,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   const [fields, setFields] = useState<FieldInfo[]>([]);
   const [xField, setXField] = useState('');
   const [yFields, setYFields] = useState<string[]>([]);
+  const [i0Field, setI0Field] = useState('');
   const [loading, setLoading] = useState(false);
   const [flashSuccess, setFlashSuccess] = useState(false);
   const lastXRef = useRef('');
@@ -243,7 +244,10 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     }
   };
 
-  const fetchAllTraces = async (x: string, ys: string[]): Promise<XYTrace[]> => {
+  const applyI0 = (y: number[], i0: number[]): number[] =>
+    y.map((v, i) => (i0[i] !== 0 && i0[i] != null ? v / i0[i] : v));
+
+  const fetchAllTraces = async (x: string, ys: string[], i0 = i0Field): Promise<XYTrace[]> => {
     const subPath = dataSubNode ? `/${dataSubNode}` : '';
     if (dataNodeFamily === 'table') {
       const resp = await fetch(`${serverUrl}/api/v1/table/full${catSeg(catalog)}/${runId}/${selectedStream}${subPath}?format=application/json`);
@@ -251,10 +255,12 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
       const table = await resp.json();
       const seqNums: number[] = table.seq_num ?? [];
       const nRows = seqNums.length > 0 ? (seqNums.findIndex(s => s === 0) === -1 ? seqNums.length : seqNums.findIndex(s => s === 0)) : undefined;
+      const i0Data: number[] = i0 ? (nRows !== undefined ? (table[i0] ?? []).slice(0, nRows) : (table[i0] ?? [])) : [];
       return ys.map(yf => {
-        const yArr = nRows !== undefined ? (table[yf] ?? []).slice(0, nRows) : (table[yf] ?? []);
+        let yArr: number[] = nRows !== undefined ? (table[yf] ?? []).slice(0, nRows) : (table[yf] ?? []);
         const xArr = nRows !== undefined ? (table[x] ?? []).slice(0, nRows) : (table[x] ?? []);
-        return { x: xArr, y: yArr, xLabel: x, yLabel: yf, runLabel, runId };
+        if (i0 && i0Data.length > 0) yArr = applyI0(yArr, i0Data);
+        return { x: xArr, y: yArr, xLabel: x, yLabel: i0 ? `${yf}/I0` : yf, runLabel, runId };
       });
     }
     const base = `${serverUrl}/api/v1/array/full${catSeg(catalog)}/${runId}/${selectedStream}${subPath}`;
@@ -264,15 +270,23 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     const xResp = await fetch(`${base}/${x}?format=application/json`);
     if (!xResp.ok) throw new Error('Fetch failed');
     const xData: number[] = await xResp.json();
-    return ys.map((yf, i) => ({ x: xData, y: yDatas[i], xLabel: x, yLabel: yf, runLabel, runId }));
+    let i0Data: number[] = [];
+    if (i0) {
+      const i0Resp = await fetch(`${base}/${i0}?format=application/json`);
+      if (i0Resp.ok) i0Data = await i0Resp.json();
+    }
+    return ys.map((yf, idx) => {
+      const y = i0 && i0Data.length > 0 ? applyI0(yDatas[idx], i0Data) : yDatas[idx];
+      return { x: xData, y, xLabel: x, yLabel: i0 ? `${yf}/I0` : yf, runLabel, runId };
+    });
   };
 
-  const handlePlot = async (x = xField, ys = yFields) => {
+  const handlePlot = async (x = xField, ys = yFields, i0 = i0Field) => {
     if (!x || ys.length === 0 || adding) return;
     setAdding(true);
     setError('');
     try {
-      const traces = await fetchAllTraces(x, ys);
+      const traces = await fetchAllTraces(x, ys, i0);
       const title = ys.length === 1 ? `${ys[0]} vs ${x}` : `${ys.join(', ')} vs ${x}`;
       onPlot(traces, title);
     } catch (e) {
@@ -484,6 +498,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
                 <th className={thClass}>Field</th>
                 {!zMode && <th className={`${thClass} text-center w-8`}>X</th>}
                 <th className={`${thClass} text-center w-8`}>{zMode ? 'Z' : 'Y'}</th>
+                {!zMode && <th className={`${thClass} text-center w-8`}>I0</th>}
                 <th className={`${thClass} text-right`}>Shape</th>
               </tr>
             </thead>
@@ -540,6 +555,28 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
                         />
                       )}
                     </td>
+                    {!zMode && (
+                      <td className={`${tdClass} text-center`}>
+                        {!isImg && (
+                          <input
+                            type="radio"
+                            name="i0Field"
+                            checked={i0Field === f.name}
+                            onChange={() => {
+                              setI0Field(f.name);
+                              if (onAddTraces) handlePlot(xField, yFields, f.name);
+                            }}
+                            onClick={() => {
+                              if (i0Field === f.name) {
+                                setI0Field('');
+                                if (onAddTraces) handlePlot(xField, yFields, '');
+                              }
+                            }}
+                            className="accent-sky-600"
+                          />
+                        )}
+                      </td>
+                    )}
                     <td className={`${tdClass} text-right text-gray-400`}>
                       {livePointCount !== null ? `(${livePointCount})` : `(${f.shape.join(', ')})`}
                     </td>
