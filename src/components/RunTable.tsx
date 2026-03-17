@@ -202,6 +202,7 @@ export default function RunTable({ serverUrl, catalog, page, selectedRunId, auto
   const [sortDesc, setSortDesc] = useState(true);
   const bgRefreshRef = useRef(false);
   const loadingRef = useRef(false);
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // keyPrefix: 'start.' for tiled 0.2.8+ (nested metadata keys), '' for tiled 0.2.3 (flat).
   // null = not yet detected.
   const [keyPrefix, setKeyPrefix] = useState<string | null>(null);
@@ -532,13 +533,24 @@ export default function RunTable({ serverUrl, catalog, page, selectedRunId, auto
                     const label = run.scanId != null ? String(run.scanId) : '';
                     if ((e.metaKey || e.ctrlKey) && onShiftClickRun) {
                       e.preventDefault();
+                      if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null; }
                       onShiftClickRun(run.id, label, run.detectorList, run.motorList, run.acquiring);
-                    } else {
-                      onSelectRun(run.id, label, run.detectorList, run.motorList, run.acquiring);
+                    } else if (e.altKey) {
+                      e.preventDefault();
+                      if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null; }
+                      onDoubleClickRun?.(run.id, label, run.detectorList, run.motorList, run.acquiring);
+                    } else if (e.detail === 1) {
+                      if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+                      clickTimerRef.current = setTimeout(() => {
+                        clickTimerRef.current = null;
+                        onSelectRun(run.id, label, run.detectorList, run.motorList, run.acquiring);
+                      }, 250);
+                    } else if (e.detail === 2) {
+                      if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null; }
+                      onDoubleClickRun?.(run.id, label, run.detectorList, run.motorList, run.acquiring);
                     }
                   }}
-                  onDoubleClick={() => onDoubleClickRun?.(run.id, run.scanId != null ? String(run.scanId) : '', run.detectorList, run.motorList, run.acquiring)}
-                  className={`cursor-pointer ${run.id === loadingRunId ? 'bg-amber-50' : run.id === selectedRunId ? 'bg-sky-100 hover:bg-sky-100' : `hover:bg-sky-50 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}`}
+                  className={`cursor-pointer select-none ${run.id === loadingRunId ? 'bg-amber-50' : run.id === selectedRunId ? 'bg-sky-100 hover:bg-sky-100' : `hover:bg-sky-50 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}`}
                 >
                   <td className={tdClass}>
                     {run.id === loadingRunId
