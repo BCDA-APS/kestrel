@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isImageField, matchesDev, devSortKey, sortFields, type FieldInfo } from './fieldUtils';
+import { isImageField, matchesDev, sortFields, type FieldInfo } from './fieldUtils';
 
 const f = (name: string, shape: number[], dtype = 'float64'): FieldInfo => ({ name, shape, dtype });
 
@@ -47,16 +47,6 @@ describe('matchesDev', () => {
   });
 });
 
-describe('devSortKey', () => {
-  it('returns the index of the matching device', () => {
-    expect(devSortKey('det2_ch1', ['det1', 'det2', 'det3'])).toBe(1);
-  });
-
-  it('returns Infinity for unmatched fields', () => {
-    expect(devSortKey('unknown', ['det1'])).toBe(Infinity);
-  });
-});
-
 describe('sortFields', () => {
   const time = f('time', [100]);
   const motor1 = f('m1', [100]);
@@ -65,19 +55,20 @@ describe('sortFields', () => {
   const det2 = f('d2_counts', [100]);
   const other = f('other', [100]);
 
-  it('places time first, then motors, then other, then detectors', () => {
-    const fields = [det2, other, motor1, time, det1, motor2];
-    const sorted = sortFields(fields, ['m1', 'm2'], ['d1', 'd2']);
-    expect(sorted.map(fi => fi.name)).toEqual(['time', 'm1', 'm2', 'other', 'd1_counts', 'd2_counts']);
+  it('places motors first, then area detectors, then detectors, then other — all alphabetical', () => {
+    const img = f('cam', [512, 512]);
+    const fields = [det2, other, motor1, time, det1, motor2, img];
+    const sorted = sortFields(fields, ['m1', 'm2'], ['d1', 'd2', 'cam']);
+    expect(sorted.map(fi => fi.name)).toEqual(['m1', 'm2', 'cam', 'd1_counts', 'd2_counts', 'other', 'time']);
   });
 
-  it('preserves device-list order for motors', () => {
+  it('sorts motors alphabetically', () => {
     const fields = [motor2, motor1];
     const sorted = sortFields(fields, ['m1', 'm2'], []);
     expect(sorted.map(fi => fi.name)).toEqual(['m1', 'm2']);
   });
 
-  it('preserves device-list order for detectors', () => {
+  it('sorts detectors alphabetically', () => {
     const fields = [det2, det1];
     const sorted = sortFields(fields, [], ['d1', 'd2']);
     expect(sorted.map(fi => fi.name)).toEqual(['d1_counts', 'd2_counts']);

@@ -127,16 +127,107 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     const fetchUrl = (url: string) =>
       fetch(url).then(r => r.ok ? r.json() : Promise.reject(new Error('http')));
 
-    const streamUrl = `${serverUrl}/api/v1/search${catSeg(catalog)}/${runId}/${selectedStream}?page[limit]=200`;
+    // Fetch all pages from a search URL, handling server-side page size caps.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fetchAllPages = async (baseUrl: string): Promise<any> => {
+      const PAGE = 200;
+      const first = await fetchUrl(`${baseUrl}?page[limit]=${PAGE}&page[offset]=0`);
+      const total: number = first?.meta?.count ?? (first?.data ?? []).length;
+      let data = first?.data ?? [];
+      let offset = data.length;
+      while (offset < total) {
+        const page = await fetchUrl(`${baseUrl}?page[limit]=${PAGE}&page[offset]=${offset}`);
+        const chunk = page?.data ?? [];
+        if (chunk.length === 0) break;
+        data = [...data, ...chunk];
+        offset += chunk.length;
+      }
+      return { ...first, data };
+    };
 
-    fetchUrl(streamUrl)
-      .then(json => {
-        // Arrays directly under stream
-        const arrays = parseArrayItems(json);
-        if (arrays.length > 0) {
-          setDataSubNode(''); setDataNodeFamily('array'); setFields(arrays); return;
+    // Get column names via table/full (may expose fields not listed in search).
+    const fetchTableColumns = async (tablePath: string): Promise<string[]> => {
+      try {
+        const r = await fetch(`${serverUrl}/api/v1/table/full${tablePath}?format=application/json`);
+        if (!r.ok) return [];
+        const data = await r.json();
+        return Object.keys(data);
+      } catch { return []; }
+    };
+
+    const streamBase = `${serverUrl}/api/v1/search${catSeg(catalog)}/${runId}/${selectedStream}`;
+    const streamPath = `${catSeg(catalog)}/${runId}/${selectedStream}`;
+
+    // Try fetching arrays from a sub-node, return empty array if not found.
+    const trySubNodeArrays = async (sub: string): Promise<FieldInfo[]> => {
+      try {
+        const j = await fetchAllPages(`${serverUrl}/api/v1/search${catSeg(catalog)}/${runId}/${selectedStream}/${sub}`);
+        return parseArrayItems(j);
+      } catch { return []; }
+    };
+
+    fetchAllPages(streamBase)
+      .then(async json => {
+        // Get shape/dtype info from search results (includes image field detection)
+        const searchArrays = parseArrayItems(json);
+        const searchByName = new Map(searchArrays.map(f => [f.name, f]));
+
+        // Try table/full first — it may expose fields not individually listed in search
+        // (e.g. 1D scan data when MCA arrays dominate the search results)
+        const tableCols = await fetchTableColumns(streamPath);
+
+        // Probe: fetch stream metadata — Bluesky descriptors may list all fields via data_keys
+        const metaUrl = `${serverUrl}/api/v1/metadata${streamPath}`;
+        const metaR = await fetch(metaUrl);
+        const metaJson = metaR.ok ? await metaR.json() : null;
+        const metaDataKeys: Record<string, unknown> = metaJson?.data?.attributes?.metadata?.data_keys ?? {};
+        const uniqueDataKeys = Object.keys(metaDataKeys);
+
+        if (tableCols.length > 0) {
+          // Use table columns as the field list (cross-reference search for shape info)
+          const tableFields: FieldInfo[] = tableCols.map(col =>
+            searchByName.get(col) ?? { name: col, shape: [], dtype: '' }
+          );
+          // Also add image-only fields from search not exposed via table (e.g. 3D MCA arrays)
+          const tableColSet = new Set(tableCols);
+          const imageExtras = searchArrays.filter(f => !tableColSet.has(f.name) && isImageField(f));
+          setDataSubNode(''); setDataNodeFamily('table');
+          setFields([...tableFields, ...imageExtras]); return;
         }
-        // Table node under stream (PostgreSQL adapter)
+
+        // Use metadata data_keys as field list (Bluesky event descriptor)
+        if (uniqueDataKeys.length > 0) {
+          const knownNames = new Set(searchArrays.map(f => f.name));
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const metaFields: FieldInfo[] = uniqueDataKeys.map(key => {
+            if (searchByName.has(key)) return searchByName.get(key)!;
+            const dk = metaDataKeys[key] as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+            const shape: number[] = dk?.shape ?? [];
+            return { name: key, shape, dtype: dk?.dtype ?? '' };
+          });
+          // Add image fields from search not in data_keys (e.g. 3D MCA arrays stored externally)
+          const imageExtras = searchArrays.filter(f => !knownNames.has(f.name) || isImageField(f))
+            .filter(f => !uniqueDataKeys.includes(f.name));
+          setDataSubNode(''); setDataNodeFamily('array');
+          setFields([...metaFields, ...imageExtras]); return;
+        }
+
+        // table/full not available — fall back to search arrays + sub-nodes
+        const subArraysData     = await trySubNodeArrays('data');
+        const subArraysInternal = subArraysData.length > 0 ? [] : await trySubNodeArrays('internal');
+        const subArrays = subArraysData.length > 0 ? subArraysData : subArraysInternal;
+        const subNode   = subArraysData.length > 0 ? 'data' : (subArraysInternal.length > 0 ? 'internal' : '');
+
+        if (searchArrays.length > 0 || subArrays.length > 0) {
+          const knownNames = new Set(searchArrays.map(f => f.name));
+          const taggedSub = subArrays
+            .filter(f => !knownNames.has(f.name))
+            .map(f => ({ ...f, subNode }));
+          setDataSubNode(subNode || ''); setDataNodeFamily('array');
+          setFields([...searchArrays, ...taggedSub]); return;
+        }
+
+        // PostgreSQL table node
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const tableItem = (json.data ?? []).find((item: any) => item.attributes?.structure_family === 'table');
         if (tableItem) {
@@ -145,14 +236,8 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
           setFields(columns.map((col: string) => ({ name: col, shape: [] })));
           return;
         }
-        // Try sub-nodes as array containers (older MongoDB adapter)
-        const trySubNode = (sub: string) =>
-          fetchUrl(`${serverUrl}/api/v1/search${catSeg(catalog)}/${runId}/${selectedStream}/${sub}?page[limit]=200`)
-            .then(j => { const fs = parseArrayItems(j); if (fs.length === 0) throw new Error('empty'); return { fs, sub }; });
 
-        return trySubNode('data')
-          .catch(() => trySubNode('internal'))
-          .then(({ fs, sub }) => { setDataSubNode(sub); setDataNodeFamily('array'); setFields(fs); });
+        setError('No fields found');
       })
       .catch(() => setError('Failed to load fields'))
       .finally(() => setLoading(false));
@@ -174,24 +259,17 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   const matchesDev = (fieldName: string, devNames: string[]) =>
     devNames.some(d => fieldName === d || fieldName.startsWith(d + '_'));
 
-  const devSortKey = (fieldName: string, devNames: string[]) => {
-    const idx = devNames.findIndex(d => fieldName === d || fieldName.startsWith(d + '_'));
-    return idx === -1 ? Infinity : idx;
-  };
-
-  // Sort fields: time → motors → other → detectors
+// Sort fields: positioners → area detectors → detectors → other, each group alphabetical
   const sortedFields = useMemo(() => {
-    const timeFields = fields.filter(f => f.name === 'time');
-    const motorFields = fields
-      .filter(f => f.name !== 'time' && matchesDev(f.name, runMotors))
-      .sort((a, b) => devSortKey(a.name, runMotors) - devSortKey(b.name, runMotors));
-    const detectorFields = fields
-      .filter(f => matchesDev(f.name, runDetectors))
-      .sort((a, b) => devSortKey(a.name, runDetectors) - devSortKey(b.name, runDetectors));
-    const otherFields = fields.filter(
-      f => f.name !== 'time' && !matchesDev(f.name, runMotors) && !matchesDev(f.name, runDetectors)
-    );
-    return [...timeFields, ...motorFields, ...otherFields, ...detectorFields];
+    const alpha = (a: FieldInfo, b: FieldInfo) => a.name.localeCompare(b.name);
+    const motorFields = fields.filter(f => matchesDev(f.name, runMotors)).sort(alpha);
+    const detFields = fields.filter(f => !matchesDev(f.name, runMotors) && matchesDev(f.name, runDetectors));
+    const imageDetFields = detFields.filter(isImageField).sort(alpha);
+    const scalarDetFields = detFields.filter(f => !isImageField(f)).sort(alpha);
+    const otherFields = fields
+      .filter(f => !matchesDev(f.name, runMotors) && !matchesDev(f.name, runDetectors))
+      .sort(alpha);
+    return [...motorFields, ...imageDetFields, ...scalarDetFields, ...otherFields];
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fields, runDetectors, runMotors]);
 
@@ -263,16 +341,24 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
         return { x: xArr, y: yArr, xLabel: x, yLabel: i0 ? `${yf}/I0` : yf, runLabel, runId };
       });
     }
-    const base = `${serverUrl}/api/v1/array/full${catSeg(catalog)}/${runId}/${selectedStream}${subPath}`;
-    const yResps = await Promise.all(ys.map(yf => fetch(`${base}/${yf}?format=application/json`)));
+    // Build a lookup: field name → base fetch URL (accounts for per-field subNode)
+    const fieldNodeMap = new Map(fields.map(f => {
+      const node = f.subNode !== undefined ? f.subNode : dataSubNode;
+      const sp = node ? `/${node}` : '';
+      return [f.name, `${serverUrl}/api/v1/array/full${catSeg(catalog)}/${runId}/${selectedStream}${sp}`];
+    }));
+    const baseDefault = `${serverUrl}/api/v1/array/full${catSeg(catalog)}/${runId}/${selectedStream}${subPath}`;
+    const baseFor = (name: string) => fieldNodeMap.get(name) ?? baseDefault;
+
+    const yResps = await Promise.all(ys.map(yf => fetch(`${baseFor(yf)}/${yf}?format=application/json`)));
     if (yResps.some(r => !r.ok)) throw new Error('Fetch failed');
     const yDatas: number[][] = await Promise.all(yResps.map(r => r.json()));
-    const xResp = await fetch(`${base}/${x}?format=application/json`);
+    const xResp = await fetch(`${baseFor(x)}/${x}?format=application/json`);
     if (!xResp.ok) throw new Error('Fetch failed');
     const xData: number[] = await xResp.json();
     let i0Data: number[] = [];
     if (i0) {
-      const i0Resp = await fetch(`${base}/${i0}?format=application/json`);
+      const i0Resp = await fetch(`${baseFor(i0)}/${i0}?format=application/json`);
       if (i0Resp.ok) i0Data = await i0Resp.json();
     }
     return ys.map((yf, idx) => {
@@ -578,7 +664,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
                       </td>
                     )}
                     <td className={`${tdClass} text-right text-gray-400`}>
-                      {livePointCount !== null ? `(${livePointCount})` : `(${f.shape.join(', ')})`}
+                      {livePointCount !== null ? `(${livePointCount})` : f.shape.length > 0 ? `(${f.shape.join(', ')})` : ''}
                     </td>
                   </tr>
                 );

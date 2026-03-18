@@ -130,7 +130,23 @@ export default function RunDataTab({ serverUrl, catalog, runId }: Props) {
         if (cancelled) return;
 
         if (r.ok) {
-          const d = await r.json();
+          let d = await r.json();
+          // Also fetch any external-file arrays (e.g. MCA detectors) not included in table/full
+          if (source.arrayBase) {
+            const searchUrl = `${source.arrayBase.replace('/api/v1/array/full', '/api/v1/search')}?page[limit]=200`;
+            const sj = await fetch(searchUrl).then(sr => sr.ok ? sr.json() : { data: [] });
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const extCols: string[] = (sj.data ?? [])
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              .filter((i: any) => i.attributes?.structure_family === 'array')
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              .map((i: any) => i.id)
+              .filter((id: string) => !(id in d));
+            if (!cancelled && extCols.length > 0) {
+              const extData = await fetchColumnarData(source.arrayBase, extCols);
+              d = { ...d, ...extData };
+            }
+          }
           if (!cancelled) setData(d);
         } else if (r.status === 404 && source.arrayBase) {
           // Older servers (MongoDB adapter) may not support table/full — fetch columns individually
