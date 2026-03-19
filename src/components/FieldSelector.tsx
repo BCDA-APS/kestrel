@@ -4,6 +4,8 @@ import type { XYTrace } from '../types';
 type FieldInfo = {
   name: string;
   shape: number[];
+  dtype: string;
+  subNode?: string;
 };
 
 type FieldSelectorProps = {
@@ -240,7 +242,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
         if (tableItem) {
           const columns: string[] = tableItem.attributes?.structure?.columns ?? [];
           setDataSubNode(tableItem.id); setDataNodeFamily('table');
-          setFields(columns.map((col: string) => ({ name: col, shape: [] })));
+          setFields(columns.map((col: string) => ({ name: col, shape: [], dtype: 'number' })));
           return;
         }
 
