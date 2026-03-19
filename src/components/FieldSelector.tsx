@@ -501,7 +501,12 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
         : `${yFields.join(', ')} vs ${xField}`;
       onLivePlot(traces, title, selectedStream, dataSubNode, dataNodeFamily);
     } catch {
-      setError('Failed to fetch data');
+      if (runAcquiring) {
+        // Data not yet available (scan just started) — retry after 2s
+        setTimeout(() => setPendingAction('live'), 2000);
+      } else {
+        setError('Failed to fetch data');
+      }
     } finally {
       setAdding(false);
     }
