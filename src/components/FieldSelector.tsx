@@ -266,17 +266,16 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   const matchesDev = (fieldName: string, devNames: string[]) =>
     devNames.some(d => fieldName === d || fieldName.startsWith(d + '_'));
 
-// Sort fields: positioners → area detectors → detectors → other, each group alphabetical
+// Sort fields: time → motors → area detectors → other, each group alphabetical
   const sortedFields = useMemo(() => {
     const alpha = (a: FieldInfo, b: FieldInfo) => a.name.localeCompare(b.name);
-    const motorFields = fields.filter(f => matchesDev(f.name, runMotors)).sort(alpha);
-    const detFields = fields.filter(f => !matchesDev(f.name, runMotors) && matchesDev(f.name, runDetectors));
-    const imageDetFields = detFields.filter(isImageField).sort(alpha);
-    const scalarDetFields = detFields.filter(f => !isImageField(f)).sort(alpha);
+    const timeField = fields.filter(f => f.name === 'time');
+    const motorFields = fields.filter(f => f.name !== 'time' && matchesDev(f.name, runMotors)).sort(alpha);
+    const imageFields = fields.filter(f => f.name !== 'time' && !matchesDev(f.name, runMotors) && isImageField(f)).sort(alpha);
     const otherFields = fields
-      .filter(f => !matchesDev(f.name, runMotors) && !matchesDev(f.name, runDetectors))
+      .filter(f => f.name !== 'time' && !matchesDev(f.name, runMotors) && !isImageField(f))
       .sort(alpha);
-    return [...motorFields, ...imageDetFields, ...scalarDetFields, ...otherFields];
+    return [...timeField, ...motorFields, ...imageFields, ...otherFields];
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fields, runDetectors, runMotors]);
 
