@@ -110,8 +110,9 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .then(json => {
         const names: string[] = (json.data ?? []).map((item: any) => item.id);
-        setStreams(names);
-        setSelectedStream(names.includes('primary') ? 'primary' : (names[0] ?? ''));
+        const nonBaseline = names.filter(n => n !== 'baseline');
+        setStreams(nonBaseline);
+        setSelectedStream(nonBaseline.includes('primary') ? 'primary' : (nonBaseline[0] ?? ''));
       })
       .catch(() => {});
   }, [serverUrl, catalog, runId]);
