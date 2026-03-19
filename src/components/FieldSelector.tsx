@@ -52,6 +52,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   const [loading, setLoading] = useState(false);
   const [flashSuccess, setFlashSuccess] = useState(false);
   const lastXRef = useRef('');
+  const lastXWasMotorRef = useRef(false);
   const lastYRef = useRef<string[]>([]);
   // True after we removed traces via onRemoveRunTraces, so the next Y check re-creates the panel
   const removedTracesRef = useRef(false);
@@ -286,7 +287,8 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     if (sortedFields.length === 0) return;
     const fieldNames = new Set(sortedFields.map(f => f.name));
 
-    if (lastXRef.current && fieldNames.has(lastXRef.current)) {
+    if (lastXRef.current && fieldNames.has(lastXRef.current) &&
+        (!lastXWasMotorRef.current || matchesDev(lastXRef.current, runMotors))) {
       setXField(lastXRef.current);
     } else {
       const firstMotor = sortedFields.find(f => f.name !== 'time' && matchesDev(f.name, runMotors));
@@ -317,6 +319,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
 
   const selectXField = (name: string) => {
     lastXRef.current = name;
+    lastXWasMotorRef.current = matchesDev(name, runMotors);
     setXField(name);
     if (onAddTraces) handlePlot(name, yFields);
   };
