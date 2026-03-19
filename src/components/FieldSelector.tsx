@@ -66,6 +66,8 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   const autoSelectImagePending = useRef(false);
   // Set to true when scheduleImageOpen is called before fields have loaded
   const pendingImageOpenRef = useRef(false);
+  // Set to true when user explicitly deselects the image radio; prevents auto-reselect on run change
+  const imageUserDismissed = useRef(false);
 
   // Reset removedTracesRef when the run changes so it doesn't bleed into the next run
   useEffect(() => {
@@ -87,10 +89,14 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     const remembered = lastImageFieldRef.current;
     const match = remembered ? imageFields.find(f => f.name === remembered) : null;
     const chosen = match ? match : imageFields[0];
-    setImageYField(chosen.name);
-    if (pendingImageOpenRef.current) {
+    if (!imageUserDismissed.current) {
+      setImageYField(chosen.name);
+      if (pendingImageOpenRef.current) {
+        pendingImageOpenRef.current = false;
+        onImageOpen(chosen.name, selectedStream, dataSubNode, chosen.shape);
+      }
+    } else {
       pendingImageOpenRef.current = false;
-      onImageOpen(chosen.name, selectedStream, dataSubNode, chosen.shape);
     }
   }, [fields, onImageOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -122,7 +128,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .filter((item: any) => item.attributes?.structure_family === 'array')
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .map((item: any) => ({ name: item.id, shape: item.attributes?.structure?.shape ?? [] }));
+        .map((item: any) => ({ name: item.id, shape: item.attributes?.structure?.shape ?? [], dtype: item.attributes?.structure?.data_type?.kind ?? '' }));
 
     const fetchUrl = (url: string) =>
       fetch(url).then(r => r.ok ? r.json() : Promise.reject(new Error('http')));
@@ -289,7 +295,13 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     if (validLastY.length > 0) {
       setYFields(validLastY);
     } else {
-      const firstDet = sortedFields.find(f => matchesDev(f.name, runDetectors));
+      // If the run has image fields, leave Y empty (image radio is the pre-selection)
+      const hasImageFields = sortedFields.some(isImageField);
+      const isNumeric = (f: FieldInfo) => !['S', 'U', 'string'].includes(f.dtype);
+      const firstDet = hasImageFields ? undefined :
+        sortedFields.find(f => !isImageField(f) && isNumeric(f) && matchesDev(f.name, runDetectors) && !matchesDev(f.name, runMotors)) ??
+        sortedFields.find(f => matchesDev(f.name, runDetectors) && !matchesDev(f.name, runMotors) && isNumeric(f)) ??
+        sortedFields.find(f => matchesDev(f.name, runDetectors));
       setYFields(firstDet ? [firstDet.name] : []);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -620,8 +632,8 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
                           type="radio"
                           name="imageYField"
                           checked={imageYField === f.name}
-                          onChange={() => { setImageYField(f.name); lastImageFieldRef.current = f.name; }}
-                          onClick={() => { if (imageYField === f.name) setImageYField(null); }}
+                          onChange={() => { setImageYField(f.name); lastImageFieldRef.current = f.name; imageUserDismissed.current = false; }}
+                          onClick={() => { if (imageYField === f.name) { setImageYField(null); imageUserDismissed.current = true; } }}
                           className="accent-sky-600"
                         />
                       ) : zMode ? (
