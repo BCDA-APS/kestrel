@@ -57,7 +57,12 @@ function MetaValue({ value, depth = 0 }: { value: any; depth?: number }) {
     );
   }
   if (typeof value === 'object') {
-    const keys = Object.keys(value);
+    const PINNED = ['uid', 'uuid', 'time'];
+    const rawKeys = Object.keys(value);
+    const keys = [
+      ...PINNED.filter(k => rawKeys.includes(k)),
+      ...rawKeys.filter(k => !PINNED.includes(k)).sort(),
+    ];
     if (keys.length === 0) return <span className="text-gray-400">{'{}'}</span>;
     return (
       <span>
