@@ -527,8 +527,8 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
       {/* Header */}
       <div className={`shrink-0 px-3 py-2 border-b border-gray-200 transition-colors duration-1000 ${flashSuccess ? 'bg-green-100' : 'bg-gray-50'}`}>
         <div className="flex items-center gap-2 mb-1.5">
-          <span className="text-xs font-semibold text-gray-600">Fields</span>
-          <span className="text-xs text-gray-400 truncate" title={runLabel}>{runLabel}</span>
+          <span className="text-xs font-semibold text-gray-500">ScanID</span>
+          <span className="text-xs font-bold text-blue-600 truncate" title={runLabel}>{runLabel}</span>
         </div>
         <div className="flex items-center gap-2">
           <select
@@ -590,13 +590,20 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
             {pendingAction === 'live' && !loading ? 'Waiting for run to start…' : 'Loading…'}
           </div>
         ) : (
-          <table className="w-full border-collapse">
+          <table className="w-full border-collapse table-fixed">
+            <colgroup>
+              <col className="w-full" />
+              {!zMode && <col className="w-8" />}
+              <col className="w-8" />
+              {!zMode && <col className="w-8" />}
+              <col className="w-14" />
+            </colgroup>
             <thead className="sticky top-0 z-10">
               <tr>
                 <th className={thClass}>Field</th>
-                {!zMode && <th className={`${thClass} text-center w-8`}>X</th>}
-                <th className={`${thClass} text-center w-8`}>{zMode ? 'Z' : 'Y'}</th>
-                {!zMode && <th className={`${thClass} text-center w-8`}>I0</th>}
+                {!zMode && <th className={`${thClass} text-center`}>X</th>}
+                <th className={`${thClass} text-center`}>{zMode ? 'Z' : 'Y'}</th>
+                {!zMode && <th className={`${thClass} text-center`}>I0</th>}
                 <th className={`${thClass} text-right`}>Shape</th>
               </tr>
             </thead>
@@ -608,7 +615,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
                 const isImg = onImageOpen && isImageField(f);
                 return (
                   <tr key={f.name} className={`cursor-pointer hover:bg-sky-50 ${rowBg}`}>
-                    <td className={`${tdClass} font-mono`}>
+                    <td className={`${tdClass} font-mono break-all`}>
                       {f.name}
                       {isDet && <span className="ml-1 text-[10px] text-purple-400 font-sans">det</span>}
                       {isMotor && <span className="ml-1 text-[10px] text-green-500 font-sans">mot</span>}
