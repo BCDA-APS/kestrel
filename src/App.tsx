@@ -205,7 +205,7 @@ export default function App() {
   });
   const [showSettings, setShowSettings] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
-  const qserverEnabled = settings.qserverEnabled !== false;
+  const qserverEnabled = settings.qserverEnabled === true;
   const isGridScan = selectedRunHintsDimensions !== null && selectedRunHintsDimensions.length === 2;
   const analysisDisabled = imageState !== null || (isGridScan && (showGridHeatmap || showGrid1D));
   const updateSetting = <K extends keyof typeof settings>(key: K, val: (typeof settings)[K]) => {
@@ -1382,7 +1382,8 @@ export default function App() {
         />
       )}
 
-      {/* Queue Server panel — always mounted to preserve console history */}
+      {/* Queue Server panel — only mounted when enabled */}
+      {qserverEnabled && (
       <div
         className={`${splitView ? 'flex-none overflow-x-auto' : 'flex-1 overflow-hidden'} ${!splitView && appTab !== 'qserver' ? 'hidden' : ''}`}
         style={splitView ? { width: splitQsWidth } : {}}
@@ -1392,6 +1393,7 @@ export default function App() {
           <QServerPanel key={qsConnectionId} proxyUrl={qsProxyUrl} serverUrl={qsInputUrl.replace(/\/$/, '')} onStatusChange={setQsStatus} />
         </div>
       </div>
+      )}
 
       </div>{/* end body flex-row */}
     </div>
