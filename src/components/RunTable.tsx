@@ -8,6 +8,7 @@ type RunRow = {
   positioners?: string;
   numPoints?: number;
   detectorList: string[];
+  hintsDetectorList: string[];
   motorList: string[];
   date?: string;
   startTime?: number;
@@ -22,13 +23,13 @@ type RunTableProps = {
   selectedRunId?: string;
   autoFollow?: boolean;
   onPageChange: (page: number) => void;
-  onSelectRun: (runId: string, label: string, detectors: string[], motors: string[], acquiring: boolean) => void;
-  onDoubleClickRun?: (runId: string, label: string, detectors: string[], motors: string[], acquiring: boolean) => void;
-  onShiftClickRun?: (runId: string, label: string, detectors: string[], motors: string[], acquiring: boolean) => void;
+  onSelectRun: (runId: string, label: string, detectors: string[], hintsDetectors: string[], motors: string[], acquiring: boolean) => void;
+  onDoubleClickRun?: (runId: string, label: string, detectors: string[], hintsDetectors: string[], motors: string[], acquiring: boolean) => void;
+  onShiftClickRun?: (runId: string, label: string, detectors: string[], hintsDetectors: string[], motors: string[], acquiring: boolean) => void;
   loadingRunId?: string | null;
   addRunError?: string | null;
   onAutoFollowChange?: (v: boolean) => void;
-  onNewAcquiringRun?: (runId: string, label: string, detectors: string[], motors: string[], acquiring: boolean) => void;
+  onNewAcquiringRun?: (runId: string, label: string, detectors: string[], hintsDetectors: string[], motors: string[], acquiring: boolean) => void;
 };
 
 type Filters = {
@@ -50,6 +51,7 @@ function parseRun(item: Record<string, unknown>): RunRow {
   const start = attrs.metadata?.start ?? {};
   const stop  = attrs.metadata?.stop;
   const detectorList: string[] = Array.isArray(start.detectors) ? start.detectors : [];
+  const hintsDetectorList: string[] = Array.isArray(start.hints?.detectors) ? start.hints.detectors : [];
   const motorList: string[] = Array.isArray(start.motors)
     ? start.motors
     : Array.isArray(start.positioners) ? start.positioners : [];
@@ -64,6 +66,7 @@ function parseRun(item: Record<string, unknown>): RunRow {
     positioners:  motorList.join(', ') || undefined,
     numPoints:    start.num_points,
     detectorList,
+    hintsDetectorList,
     motorList,
     date,
     startTime:    typeof start.time === 'number' ? start.time : undefined,
@@ -260,7 +263,7 @@ export default function RunTable({ serverUrl, catalog, page, selectedRunId, auto
         if (items.length === 0) { initialDone = true; return; }
         const run = parseRun(items[0]);
         if (initialDone && run.id !== lastSeenId && run.acquiring) {
-          onNewAcquiringRunRef.current?.(run.id, run.scanId != null ? String(run.scanId) : '', run.detectorList, run.motorList, run.acquiring);
+          onNewAcquiringRunRef.current?.(run.id, run.scanId != null ? String(run.scanId) : '', run.detectorList, run.hintsDetectorList, run.motorList, run.acquiring);
         }
         lastSeenId = run.id;
         initialDone = true;
@@ -534,20 +537,20 @@ export default function RunTable({ serverUrl, catalog, page, selectedRunId, auto
                     if ((e.metaKey || e.ctrlKey) && onShiftClickRun) {
                       e.preventDefault();
                       if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null; }
-                      onShiftClickRun(run.id, label, run.detectorList, run.motorList, run.acquiring);
+                      onShiftClickRun(run.id, label, run.detectorList, run.hintsDetectorList, run.motorList, run.acquiring);
                     } else if (e.altKey) {
                       e.preventDefault();
                       if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null; }
-                      onDoubleClickRun?.(run.id, label, run.detectorList, run.motorList, run.acquiring);
+                      onDoubleClickRun?.(run.id, label, run.detectorList, run.hintsDetectorList, run.motorList, run.acquiring);
                     } else if (e.detail === 1) {
                       if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
                       clickTimerRef.current = setTimeout(() => {
                         clickTimerRef.current = null;
-                        onSelectRun(run.id, label, run.detectorList, run.motorList, run.acquiring);
+                        onSelectRun(run.id, label, run.detectorList, run.hintsDetectorList, run.motorList, run.acquiring);
                       }, 250);
                     } else if (e.detail === 2) {
                       if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null; }
-                      onDoubleClickRun?.(run.id, label, run.detectorList, run.motorList, run.acquiring);
+                      onDoubleClickRun?.(run.id, label, run.detectorList, run.hintsDetectorList, run.motorList, run.acquiring);
                     }
                   }}
                   className={`cursor-pointer select-none ${run.id === loadingRunId ? 'bg-amber-50' : run.id === selectedRunId ? 'bg-sky-100 hover:bg-sky-100' : `hover:bg-sky-50 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}`}

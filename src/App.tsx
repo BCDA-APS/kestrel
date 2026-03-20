@@ -170,6 +170,7 @@ export default function App() {
   const [selectedRunId, setSelectedRunId] = useState('');
   const [selectedRunLabel, setSelectedRunLabel] = useState('');
   const [selectedRunDetectors, setSelectedRunDetectors] = useState<string[]>([]);
+  const [selectedRunHintsDetectors, setSelectedRunHintsDetectors] = useState<string[]>([]);
   const [selectedRunMotors, setSelectedRunMotors] = useState<string[]>([]);
   const [selectedRunAcquiring, setSelectedRunAcquiring] = useState(false);
   const [selectedRunShape, setSelectedRunShape] = useState<number[] | null>(null);
@@ -200,7 +201,7 @@ export default function App() {
   const [centerTab, setCenterTab] = useState<'graph' | 'data' | 'metadata' | 'summary'>('graph');
   const [appTab, setAppTab] = useState<'visualizer' | 'qserver'>('visualizer');
   const [splitView, setSplitView] = useState(false);
-  const [settings, setSettings] = useState<{ qserverEnabled?: boolean }>(() => {
+  const [settings, setSettings] = useState<{ qserverEnabled?: boolean; detectorDefault?: 'smart' | 'hints' | 'last' }>(() => {
     try { return JSON.parse(localStorage.getItem('appSettings') ?? '{}'); } catch { return {}; }
   });
   const [showSettings, setShowSettings] = useState(false);
@@ -858,6 +859,17 @@ export default function App() {
                   <input type="checkbox" checked={qserverEnabled} onChange={e => updateSetting('qserverEnabled', e.target.checked)} className="accent-sky-500" />
                   <span className="text-white text-xs">Enable QServer panel</span>
                 </label>
+                <p className="text-sky-400 text-[10px] font-medium uppercase tracking-wide mt-3 mb-1">Default detector</p>
+                {(['smart', 'hints', 'last'] as const).map(opt => (
+                  <label key={opt} className="flex items-center gap-2 cursor-pointer mt-1">
+                    <input type="radio" name="detectorDefault" value={opt} checked={(settings.detectorDefault ?? 'smart') === opt} onChange={() => updateSetting('detectorDefault', opt)} className="accent-sky-500" />
+                    <span className="text-white text-xs">
+                      {opt === 'smart' && 'Smart: use hints when no prior manual selection'}
+                      {opt === 'hints' && 'Hints: always use hints detectors'}
+                      {opt === 'last' && 'Last: always restore last manual selection'}
+                    </span>
+                  </label>
+                ))}
               </div>
             )}
           </div>
@@ -1022,6 +1034,17 @@ export default function App() {
                   <input type="checkbox" checked={qserverEnabled} onChange={e => updateSetting('qserverEnabled', e.target.checked)} className="accent-sky-500" />
                   <span className="text-white text-xs">Enable QServer panel</span>
                 </label>
+                <p className="text-sky-400 text-[10px] font-medium uppercase tracking-wide mt-3 mb-1">Default detector</p>
+                {(['smart', 'hints', 'last'] as const).map(opt => (
+                  <label key={opt} className="flex items-center gap-2 cursor-pointer mt-1">
+                    <input type="radio" name="detectorDefault" value={opt} checked={(settings.detectorDefault ?? 'smart') === opt} onChange={() => updateSetting('detectorDefault', opt)} className="accent-sky-500" />
+                    <span className="text-white text-xs">
+                      {opt === 'smart' && 'Smart: use hints when no prior manual selection'}
+                      {opt === 'hints' && 'Hints: always use hints detectors'}
+                      {opt === 'last' && 'Last: always restore last manual selection'}
+                    </span>
+                  </label>
+                ))}
               </div>
             )}
           </div>
@@ -1053,7 +1076,7 @@ export default function App() {
                   selectedRunId={selectedRunId}
                   autoFollow={autoFollow}
                   onPageChange={setRunPage}
-                  onSelectRun={(id, label, dets, motors, acquiring) => {
+                  onSelectRun={(id, label, dets, hintsDets, motors, acquiring) => {
                     if (id === selectedRunId && acquiring) {
                       fieldSelectorRef.current?.scheduleLive();
                       return;
@@ -1065,14 +1088,16 @@ export default function App() {
                     setSelectedRunId(id);
                     setSelectedRunLabel(label);
                     setSelectedRunDetectors(dets);
+                    setSelectedRunHintsDetectors(hintsDets);
                     setSelectedRunMotors(motors);
                     setSelectedRunAcquiring(acquiring);
                   }}
-                  onDoubleClickRun={(id, label, dets, motors, acquiring) => {
+                  onDoubleClickRun={(id, label, dets, hintsDets, motors, acquiring) => {
                     const isSameRun = id === selectedRunId;
                     setSelectedRunId(id);
                     setSelectedRunLabel(label);
                     setSelectedRunDetectors(dets);
+                    setSelectedRunHintsDetectors(hintsDets);
                     setSelectedRunMotors(motors);
                     setSelectedRunAcquiring(acquiring);
                     if (!acquiring) {
@@ -1090,11 +1115,12 @@ export default function App() {
                   loadingRunId={addRunId}
                   addRunError={addRunError}
                   onAutoFollowChange={setAutoFollow}
-                  onNewAcquiringRun={(id, label, dets, motors, acquiring) => {
+                  onNewAcquiringRun={(id, label, dets, hintsDets, motors, acquiring) => {
                     if (!autoFollow) return;
                     setSelectedRunId(id);
                     setSelectedRunLabel(label);
                     setSelectedRunDetectors(dets);
+                    setSelectedRunHintsDetectors(hintsDets);
                     setSelectedRunMotors(motors);
                     setSelectedRunAcquiring(acquiring);
                   }}
@@ -1115,6 +1141,8 @@ export default function App() {
                       runId={selectedRunId}
                       runLabel={selectedRunLabel}
                       runDetectors={selectedRunDetectors}
+                      runHintsDetectors={selectedRunHintsDetectors}
+                      detectorDefault={settings.detectorDefault ?? 'smart'}
                       runMotors={selectedRunMotors}
                       runAcquiring={selectedRunAcquiring}
                       onPlot={plot}

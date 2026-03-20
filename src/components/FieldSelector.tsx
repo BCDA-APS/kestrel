@@ -14,6 +14,8 @@ type FieldSelectorProps = {
   runId: string;
   runLabel: string;
   runDetectors: string[];
+  runHintsDetectors?: string[];
+  detectorDefault?: 'smart' | 'hints' | 'last';
   runMotors: string[];
   runAcquiring: boolean;
   onPlot: (traces: XYTrace[], title: string) => void;
@@ -36,7 +38,7 @@ const catSeg = (c: string | null) => c ? `/${c}` : '';
 
 const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(function FieldSelector({
   serverUrl, catalog, runId, runLabel,
-  runDetectors, runMotors, runAcquiring,
+  runDetectors, runHintsDetectors = [], detectorDefault = 'smart', runMotors, runAcquiring,
   onPlot, onAddTraces, onLivePlot, onRemoveRunTraces, onZSelect, onGridPlot, onGrid1DPlot, onImageOpen,
 }, ref) {
   const zMode = !!onZSelect;
@@ -326,12 +328,23 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     }
 
     const validLastY = lastYRef.current.filter(y => fieldNames.has(y));
-    if (validLastY.length > 0) {
+    const hasImageFields = sortedFields.some(isImageField);
+    const isNumeric = (f: FieldInfo) => !['S', 'U', 'string'].includes(f.dtype);
+
+    if (detectorDefault === 'last' && validLastY.length > 0) {
+      setYFields(validLastY);
+    } else if (detectorDefault === 'hints' || (detectorDefault === 'smart' && validLastY.length === 0)) {
+      // Prefer hints detectors; fall back to full detector list
+      const hintsDets = runHintsDetectors.length > 0 ? runHintsDetectors : runDetectors;
+      const firstDet = hasImageFields ? undefined :
+        sortedFields.find(f => !isImageField(f) && isNumeric(f) && matchesDev(f.name, hintsDets) && !matchesDev(f.name, runMotors)) ??
+        sortedFields.find(f => !isImageField(f) && isNumeric(f) && matchesDev(f.name, runDetectors) && !matchesDev(f.name, runMotors)) ??
+        sortedFields.find(f => matchesDev(f.name, runDetectors));
+      setYFields(firstDet ? [firstDet.name] : []);
+    } else if (validLastY.length > 0) {
       setYFields(validLastY);
     } else {
-      // If the run has image fields, leave Y empty (image radio is the pre-selection)
-      const hasImageFields = sortedFields.some(isImageField);
-      const isNumeric = (f: FieldInfo) => !['S', 'U', 'string'].includes(f.dtype);
+      // last mode with no prior selection: fall back to first available detector
       const firstDet = hasImageFields ? undefined :
         sortedFields.find(f => !isImageField(f) && isNumeric(f) && matchesDev(f.name, runDetectors) && !matchesDev(f.name, runMotors)) ??
         sortedFields.find(f => matchesDev(f.name, runDetectors) && !matchesDev(f.name, runMotors) && isNumeric(f)) ??
@@ -339,7 +352,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
       setYFields(firstDet ? [firstDet.name] : []);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortedFields, runMotors, runDetectors]);
+  }, [sortedFields, runMotors, runDetectors, runHintsDetectors, detectorDefault]);
 
   // In z-mode, emit the selected field whenever yFields[0] changes (auto-select or user click)
   useEffect(() => {
