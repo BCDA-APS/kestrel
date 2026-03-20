@@ -18,6 +18,11 @@ const PORT = parseInt(process.env.PORT ?? '4173');
 
 const app = express();
 
+app.use((req, _res, next) => {
+  console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
+  next();
+});
+
 /** Parse a proxy URL of the form /<protocol>/<host:port>/... */
 function parseProxyTarget(url) {
   const match = (url ?? '/').match(/^\/?([^/]+)\/([^/]+)(\/.*)?$/);
