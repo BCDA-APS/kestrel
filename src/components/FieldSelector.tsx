@@ -358,7 +358,10 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     const next = yFields.includes(name) ? yFields.filter(n => n !== name) : [...yFields, name];
     lastYRef.current = next;
     setYFields(next);
-    if (onAddTraces || removedTracesRef.current) {
+    if (runAcquiring && onLivePlot) {
+      // During live acquisition: re-trigger live plot with new selection; never remove traces
+      if (next.length > 0) setPendingAction('live');
+    } else if (onAddTraces || removedTracesRef.current) {
       if (next.length > 0) {
         removedTracesRef.current = false;
         handlePlot(xField, next);
