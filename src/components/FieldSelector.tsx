@@ -96,7 +96,8 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
       setImageYField(chosen.name);
       if (pendingImageOpenRef.current) {
         pendingImageOpenRef.current = false;
-        onImageOpen(chosen.name, selectedStream, dataSubNode, chosen.shape);
+        const imgSubNode = chosen.subNode !== undefined ? chosen.subNode : dataSubNode;
+        onImageOpen(chosen.name, selectedStream, imgSubNode, chosen.shape);
       }
     } else {
       pendingImageOpenRef.current = false;
@@ -155,25 +156,30 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
       return { ...first, data };
     };
 
-    // Get column names via table/full (may expose fields not listed in search).
-    const fetchTableColumns = async (tablePath: string): Promise<string[]> => {
+    // Get column names via table/full. Returns {exists, cols} to distinguish
+    // "table endpoint not found" (404 → not a table scan) from "table exists but
+    // has no rows yet" (200 with {} → table scan that hasn't produced data yet).
+    const fetchTableStatus = async (tablePath: string): Promise<{ exists: boolean; cols: string[] }> => {
       try {
         const r = await fetch(`${serverUrl}/api/v1/table/full${tablePath}?format=application/json`);
-        if (!r.ok) return [];
+        if (!r.ok) return { exists: false, cols: [] };
         const data = await r.json();
-        return Object.keys(data);
-      } catch { return []; }
+        // Guard against servers that return 200 with {"detail": "..."} for unsupported structure
+        if ('detail' in data) return { exists: false, cols: [] };
+        return { exists: true, cols: Object.keys(data) };
+      } catch { return { exists: false, cols: [] }; }
     };
 
     const streamBase = `${serverUrl}/api/v1/search${catSeg(catalog)}/${runId}/${selectedStream}`;
     const streamPath = `${catSeg(catalog)}/${runId}/${selectedStream}`;
 
-    // Try fetching arrays from a sub-node, return empty array if not found.
-    const trySubNodeArrays = async (sub: string): Promise<FieldInfo[]> => {
+    // Try fetching arrays from a sub-node. Returns {exists, fields} to distinguish
+    // "sub-node not found" (404) from "sub-node exists but has no arrays yet".
+    const trySubNodeArrays = async (sub: string): Promise<{ exists: boolean; fields: FieldInfo[] }> => {
       try {
         const j = await fetchAllPages(`${serverUrl}/api/v1/search${catSeg(catalog)}/${runId}/${selectedStream}/${sub}`);
-        return parseArrayItems(j);
-      } catch { return []; }
+        return { exists: true, fields: parseArrayItems(j) };
+      } catch { return { exists: false, fields: [] }; }
     };
 
     fetchAllPages(streamBase)
@@ -184,7 +190,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
 
         // Try table/full first — it may expose fields not individually listed in search
         // (e.g. 1D scan data when MCA arrays dominate the search results)
-        const tableCols = await fetchTableColumns(streamPath);
+        const tableStatus = await fetchTableStatus(streamPath);
 
         // Probe: fetch stream metadata — Bluesky descriptors may list all fields via data_keys
         const metaUrl = `${serverUrl}/api/v1/metadata${streamPath}`;
@@ -193,19 +199,68 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
         const metaDataKeys: Record<string, unknown> = metaJson?.data?.attributes?.metadata?.data_keys ?? {};
         const uniqueDataKeys = Object.keys(metaDataKeys);
 
-        if (tableCols.length > 0) {
+        if (tableStatus.exists && tableStatus.cols.length > 0) {
           // Use table columns as the field list (cross-reference search for shape info)
-          const tableFields: FieldInfo[] = tableCols.map(col =>
+          const tableFields: FieldInfo[] = tableStatus.cols.map(col =>
             searchByName.get(col) ?? { name: col, shape: [], dtype: '' }
           );
           // Also add image-only fields from search not exposed via table (e.g. 3D MCA arrays)
-          const tableColSet = new Set(tableCols);
+          const tableColSet = new Set(tableStatus.cols);
           const imageExtras = searchArrays.filter(f => !tableColSet.has(f.name) && isImageField(f));
           setDataSubNode(''); setDataNodeFamily('table');
           setFields([...tableFields, ...imageExtras]); return;
         }
 
-        // Use metadata data_keys as field list (Bluesky event descriptor)
+        if (tableStatus.exists) {
+          // Table endpoint exists but has no rows yet (live scan hasn't produced data).
+          // Lock in table format and leave fields empty so the retry loop keeps polling.
+          setDataSubNode(''); setDataNodeFamily('table');
+          setFields([]); return;
+        }
+
+        // Sub-node discovery: for MongoDB/container adapters, arrays live under primary/data
+        // or primary/internal. Discover the sub-node BEFORE the data_keys fallback so that
+        // fetchAllTraces always builds URLs with the correct sub-node path.
+        const subData     = await trySubNodeArrays('data');
+        const subInternal = subData.exists ? { exists: false, fields: [] as FieldInfo[] }
+                                           : await trySubNodeArrays('internal');
+        const subArrays   = subData.fields.length > 0 ? subData.fields : subInternal.fields;
+        // Keep the sub-node name even when the container exists but has no arrays yet
+        // (live scan that hasn't emitted events), so data_keys fields get the right URL.
+        const subNode = subData.fields.length > 0   ? 'data'
+                      : subInternal.fields.length > 0 ? 'internal'
+                      : subData.exists               ? 'data'
+                      : subInternal.exists           ? 'internal'
+                      : '';
+
+        if (searchArrays.length > 0 || subArrays.length > 0) {
+          const knownNames = new Set(searchArrays.map(f => f.name));
+          const taggedSub = subArrays
+            .filter(f => !knownNames.has(f.name))
+            .map(f => ({ ...f, subNode }));
+          setDataSubNode(subNode || ''); setDataNodeFamily('array');
+          setFields([...searchArrays, ...taggedSub]); return;
+        }
+
+        // PostgreSQL table node: table is a sub-node of the stream container.
+        // Must be checked before data_keys so the correct URL is used.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const tableItem = (json.data ?? []).find((item: any) => item.attributes?.structure_family === 'table');
+        if (tableItem) {
+          const columns: string[] = tableItem.attributes?.structure?.columns ?? [];
+          const tableColSet = new Set(columns);
+          // Image arrays live directly under the stream, not inside the table sub-node.
+          // Tag them with subNode='' so onImageOpen builds the right array/full URL.
+          const imageExtras = searchArrays
+            .filter(f => !tableColSet.has(f.name) && isImageField(f))
+            .map(f => ({ ...f, subNode: '' }));
+          setDataSubNode(tableItem.id); setDataNodeFamily('table');
+          setFields([...columns.map((col: string) => ({ name: col, shape: [], dtype: 'number' })), ...imageExtras]);
+          return;
+        }
+
+        // Use metadata data_keys for field names, with the sub-node discovered above so that
+        // fetchAllTraces builds the correct array/full URL (e.g. primary/data/fieldName).
         if (uniqueDataKeys.length > 0) {
           const knownNames = new Set(searchArrays.map(f => f.name));
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -218,33 +273,8 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
           // Add image fields from search not in data_keys (e.g. 3D MCA arrays stored externally)
           const imageExtras = searchArrays.filter(f => !knownNames.has(f.name) || isImageField(f))
             .filter(f => !uniqueDataKeys.includes(f.name));
-          setDataSubNode(''); setDataNodeFamily('array');
+          setDataSubNode(subNode); setDataNodeFamily('array');
           setFields([...metaFields, ...imageExtras]); return;
-        }
-
-        // table/full not available — fall back to search arrays + sub-nodes
-        const subArraysData     = await trySubNodeArrays('data');
-        const subArraysInternal = subArraysData.length > 0 ? [] : await trySubNodeArrays('internal');
-        const subArrays = subArraysData.length > 0 ? subArraysData : subArraysInternal;
-        const subNode   = subArraysData.length > 0 ? 'data' : (subArraysInternal.length > 0 ? 'internal' : '');
-
-        if (searchArrays.length > 0 || subArrays.length > 0) {
-          const knownNames = new Set(searchArrays.map(f => f.name));
-          const taggedSub = subArrays
-            .filter(f => !knownNames.has(f.name))
-            .map(f => ({ ...f, subNode }));
-          setDataSubNode(subNode || ''); setDataNodeFamily('array');
-          setFields([...searchArrays, ...taggedSub]); return;
-        }
-
-        // PostgreSQL table node
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const tableItem = (json.data ?? []).find((item: any) => item.attributes?.structure_family === 'table');
-        if (tableItem) {
-          const columns: string[] = tableItem.attributes?.structure?.columns ?? [];
-          setDataSubNode(tableItem.id); setDataNodeFamily('table');
-          setFields(columns.map((col: string) => ({ name: col, shape: [], dtype: 'number' })));
-          return;
         }
 
         setError('No fields found');
@@ -346,19 +376,21 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     const subPath = dataSubNode ? `/${dataSubNode}` : '';
     if (dataNodeFamily === 'table') {
       const resp = await fetch(`${serverUrl}/api/v1/table/full${catSeg(catalog)}/${runId}/${selectedStream}${subPath}?format=application/json`);
-      if (!resp.ok) throw new Error('Fetch failed');
-      const table = await resp.json();
-      const seqNums: number[] = table.seq_num ?? [];
-      const nRows = seqNums.length > 0 ? (seqNums.findIndex(s => s === 0) === -1 ? seqNums.length : seqNums.findIndex(s => s === 0)) : undefined;
-      const i0Data: number[] = i0 ? (nRows !== undefined ? (table[i0] ?? []).slice(0, nRows) : (table[i0] ?? [])) : [];
-      return ys.map(yf => {
-        let yArr: number[] = nRows !== undefined ? (table[yf] ?? []).slice(0, nRows) : (table[yf] ?? []);
-        const xArr = nRows !== undefined ? (table[x] ?? []).slice(0, nRows) : (table[x] ?? []);
-        if (i0 && i0Data.length > 0) yArr = applyI0(yArr, i0Data);
-        return { x: xArr, y: yArr, xLabel: x, yLabel: i0 ? `${yf}/I0` : yf, runLabel, runId };
-      });
+      if (resp.ok) {
+        const table = await resp.json();
+        const seqNums: number[] = table.seq_num ?? [];
+        const nRows = seqNums.length > 0 ? (seqNums.findIndex(s => s === 0) === -1 ? seqNums.length : seqNums.findIndex(s => s === 0)) : undefined;
+        const i0Data: number[] = i0 ? (nRows !== undefined ? (table[i0] ?? []).slice(0, nRows) : (table[i0] ?? [])) : [];
+        return ys.map(yf => {
+          let yArr: number[] = nRows !== undefined ? (table[yf] ?? []).slice(0, nRows) : (table[yf] ?? []);
+          const xArr = nRows !== undefined ? (table[x] ?? []).slice(0, nRows) : (table[x] ?? []);
+          if (i0 && i0Data.length > 0) yArr = applyI0(yArr, i0Data);
+          return { x: xArr, y: yArr, xLabel: x, yLabel: i0 ? `${yf}/I0` : yf, runLabel, runId };
+        });
+      }
+      // table/full failed — fall through to per-column array fetches
     }
-    // Build a lookup: field name → base fetch URL (accounts for per-field subNode)
+    // Build a lookup: field name → base fetch URL (accounts for per-field subNode overrides)
     const fieldNodeMap = new Map(fields.map(f => {
       const node = f.subNode !== undefined ? f.subNode : dataSubNode;
       const sp = node ? `/${node}` : '';
@@ -455,10 +487,11 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     },
     scheduleImageOpen: () => {
       if (!onImageOpen) { setPendingAction('plot'); return; }
-      // If image field already selected and stream/dataSubNode are ready, open immediately
+      // If image field already selected and stream is ready, open immediately
       const f = fields.find(fi => fi.name === imageYField);
-      if (imageYField && f && selectedStream && dataSubNode) {
-        onImageOpen(imageYField, selectedStream, dataSubNode, f.shape);
+      if (imageYField && f && selectedStream) {
+        const imgSubNode = f.subNode !== undefined ? f.subNode : dataSubNode;
+        onImageOpen(imageYField, selectedStream, imgSubNode, f.shape);
       } else {
         // Defer: auto-select will fire and then open
         pendingImageOpenRef.current = true;
@@ -567,7 +600,10 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
                 <button
                   onClick={() => {
                     const f = fields.find(fi => fi.name === imageYField);
-                    if (f) onImageOpen(imageYField, selectedStream, dataSubNode, f.shape);
+                    if (f) {
+                      const imgSubNode = f.subNode !== undefined ? f.subNode : dataSubNode;
+                      onImageOpen(imageYField, selectedStream, imgSubNode, f.shape);
+                    }
                   }}
                   className="px-2 py-0.5 text-xs bg-sky-600 text-white rounded hover:bg-sky-500 font-medium"
                 >View image</button>

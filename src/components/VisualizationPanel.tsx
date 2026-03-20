@@ -98,6 +98,8 @@ function TraceChip({ t, i: _i, style, color, onRemove }: {
 
 function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTracesUpdate, extraTraces, onRemoveExtraTrace, xLog, yLog, fitResults, traceStyles, cursor1, cursor2, cursor1Y, cursor2Y, onPlotClick, showCrosshair }: VisualizationPanelProps & { panel: Extract<Panel, { type: 'xy' }> }) {
   const [liveTraces, setLiveTraces] = useState<XYTrace[] | null>(null);
+  const tracesRef = useRef(panel.traces);
+  tracesRef.current = panel.traces;
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [xRange, setXRange] = useState<[number, number] | undefined>();
   const [yRange, setYRange] = useState<[number, number] | undefined>();
@@ -159,14 +161,14 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
           const table = await resp.json();
           const seqNums: number[] = table.seq_num ?? [];
           const nRows = seqNums.length > 0 ? (seqNums.findIndex(s => s === 0) === -1 ? seqNums.length : seqNums.findIndex(s => s === 0)) : undefined;
-          updated = panel.traces.map(trace => {
+          updated = tracesRef.current.map(trace => {
             const y = nRows !== undefined ? (table[trace.yLabel] ?? trace.y).slice(0, nRows) : (table[trace.yLabel] ?? trace.y);
             const x = nRows !== undefined ? (table[trace.xLabel] ?? trace.x).slice(0, nRows) : (table[trace.xLabel] ?? trace.x);
             return { ...trace, x, y };
           });
         } else {
           const base = `${serverUrl}/api/v1/array/full${cs}/${runId}/${stream}${subPath}`;
-          updated = await Promise.all(panel.traces.map(async (trace) => {
+          updated = await Promise.all(tracesRef.current.map(async (trace) => {
             const yr = await fetch(`${base}/${trace.yLabel}?format=application/json`);
             if (!yr.ok) return trace;
             const y: number[] = await yr.json();

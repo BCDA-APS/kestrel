@@ -511,7 +511,10 @@ export default function App() {
       setShowGrid1D(false);
       return;
     }
-    setPanel({ id: crypto.randomUUID(), type: 'xy' as const, traces, title });
+    setPanel(prev => ({
+      id: crypto.randomUUID(), type: 'xy' as const, traces, title,
+      ...(prev?.type === 'xy' && prev.liveConfig ? { liveConfig: prev.liveConfig } : {}),
+    }));
     setFitResults(null);
     setShowDerivative(false);
   }, []);
