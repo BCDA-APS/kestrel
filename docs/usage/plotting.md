@@ -23,7 +23,4 @@ With a plot already open, select a different run and click **+** (or Ctrl/Cmd+cl
 
 ## Live plots
 
-Selecting an **acquiring** run starts a live plot that updates in real time as new data points arrive. The plot freezes automatically when the run completes.
-
-!!! note
-    Live data is streamed via SSE (Server-Sent Events) through the Tiled server. The connection indicator in the toolbar shows the current status.
+Selecting an **acquiring** run starts a live plot that polls for new data every 2 seconds. The plot freezes automatically when the run completes.

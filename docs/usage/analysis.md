@@ -1,6 +1,6 @@
 # Analysis
 
-Click **Analyze** on any plot or cross-section cut to open it in the analysis panel.
+The analysis panel sits to the right of the plot and is always active for 1D plots (collapse/expand with the panel border). For 2D grid scans and image views, click **Analyze** on a cross-section cut to send it to the analysis panel.
 
 ## Axis controls
 
@@ -8,8 +8,7 @@ Click **Analyze** on any plot or cross-section cut to open it in the analysis pa
 |---------|-------------|
 | **Log X** | Toggle logarithmic X axis |
 | **Log Y** | Toggle logarithmic Y axis |
-| **Derivative** | Plot dY/dX instead of Y; use **Smooth** to pre-smooth before differentiating, and **Normalize** to scale the derivative to the same range as the source |
-| **Smooth** | Gaussian smoothing window applied before plotting or differentiating (1–99 points) |
+| **Derivative** | Plot dY/dX instead of Y; use **Smooth** to pre-smooth before differentiating (1–99 points), and **Normalize** to scale the derivative to the same range as the source |
 
 ## Trace style
 
@@ -24,7 +23,7 @@ Select a trace in the legend to customize its appearance:
 
 ## Statistics
 
-The panel displays statistics for the active trace (or the region between cursors when both are placed): peak position, peak value, min, max, mean, standard deviation, center of mass, and FWHM.
+The panel displays statistics for the active trace: peak position, peak value, min, max, mean, standard deviation, center of mass, and FWHM.
 
 ## Curve fitting
 
