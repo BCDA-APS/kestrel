@@ -4,7 +4,11 @@ The QServer panel connects to a [bluesky-queueserver](https://blueskyproject.io/
 
 ## Enabling the panel
 
-Click the **QServer** tab in the top navigation bar. Enter the RE Manager URL (e.g. `http://localhost:60610`) and click **Connect**.
+The QServer tab is hidden by default. To enable it, open **Settings** (gear icon in the toolbar) and turn on **QServer**. The tab will appear in the top navigation bar.
+
+## Connecting
+
+Enter the RE Manager URL (e.g. `http://localhost:60610`) and click **Connect**. If your RE Manager requires authentication, enter your API key in the settings panel before connecting.
 
 ## Submitting plans
 
@@ -12,7 +16,7 @@ Click the **QServer** tab in the top navigation bar. Enter the RE Manager URL (e
 2. Fill in the parameters
 3. Click **Add to Queue**
 
-The plan appears in the queue table. Click **Start** to begin execution.
+The plan appears in the queue table. Click **Start** to begin execution. Enable **Auto-start** to have the queue start automatically whenever a new plan is added.
 
 ## Monitoring
 
@@ -22,4 +26,4 @@ The **Running Plan** section shows the currently executing plan with live status
 
 - Drag rows to reorder the queue
 - Select multiple rows to delete or move them in bulk
-- Use **History** to review previously executed plans and export results
+- Use **History** to review previously executed plans

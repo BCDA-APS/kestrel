@@ -23,6 +23,10 @@ Both plots show a dashed line indicating the crosshair position, and the axes ar
 
 Click **Analyze** on either cut plot to send it to the [Analysis panel](analysis.md).
 
+## Color maps
+
+Select a color map from the toolbar dropdown. The choice is saved and applied to all heatmap and image views. Available palettes: viridis, plasma, inferno, magma, hot, greys, RdBu, turbo.
+
 ## Detection criteria
 
 A run is treated as a 2D grid scan when:
