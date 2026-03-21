@@ -3,10 +3,11 @@
 ## Setup
 
 ```bash
-conda activate kestrel
 npm install
 npm run dev
 ```
+
+If you installed Node.js via conda, activate the environment first: `conda activate kestrel`.
 
 ## Scripts
 

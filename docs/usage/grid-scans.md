@@ -19,8 +19,6 @@ After clicking to place a crosshair:
 - **Vertical cut** (top-right) — intensity vs. slow motor position at the selected fast motor column
 - **Horizontal cut** (bottom-left) — intensity vs. fast motor position at the selected slow motor row
 
-Both plots show a dashed line indicating the crosshair position, and the axes are aligned with the heatmap so features line up pixel-perfectly.
-
 Click **Analyze** on either cut plot to send it to the [Analysis panel](analysis.md).
 
 ## Color maps

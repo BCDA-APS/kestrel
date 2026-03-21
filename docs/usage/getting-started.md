@@ -12,30 +12,24 @@ The run table shows all runs in the selected catalog. Use the filter controls ab
 
 | Interaction | Action |
 |-------------|--------|
-| Click | Select the run and load its fields in the sidebar |
+| Click | Select the run and load its fields into the field selector |
 | Double-click or Alt+click | Open a plot (or image viewer) immediately using auto-selected fields |
 | Ctrl/Cmd+click | Add the run's traces to the current plot without replacing it |
-
-The sidebar shows three tabs for the selected run:
-
-| Tab | Contents |
-|-----|----------|
-| **Summary** | Plan name, motors, detectors, point count, status |
-| **Data** | Raw stream data as a searchable table |
-| **Metadata** | Full run start/stop document |
 
 ### Auto-follow
 
 Enable **Auto-follow** in the run table toolbar to automatically select and plot each new acquiring run as it appears. Useful for monitoring a live experiment without clicking.
 
-## Center panel tabs
+## Center panel
+
+Clicking a run populates the center panel. Use the tabs at the top to switch views:
 
 | Tab | Description |
 |-----|-------------|
 | **Graph** | XY plot or heatmap (auto-selected based on run type) |
-| **Data** | Stream data table |
-| **Metadata** | Run metadata browser |
-| **Summary** | Run overview |
+| **Summary** | Plan name, motors, detectors, point count, status |
+| **Data** | Raw stream data as a searchable table |
+| **Metadata** | Full run start/stop document |
 
 ## Settings
 
