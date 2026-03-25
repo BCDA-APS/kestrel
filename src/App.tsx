@@ -514,11 +514,14 @@ export default function App() {
     }
     setPanel(prev => ({
       id: crypto.randomUUID(), type: 'xy' as const, traces, title,
-      ...(prev?.type === 'xy' && prev.liveConfig ? { liveConfig: prev.liveConfig } : {}),
+      // Only carry liveConfig forward when re-plotting the same live run (e.g. field
+      // selection change mid-scan). If the run changed, drop it so the stale poll stops.
+      ...(prev?.type === 'xy' && prev.liveConfig && prev.liveConfig.runId === selectedRunId
+        ? { liveConfig: prev.liveConfig } : {}),
     }));
     setFitResults(null);
     setShowDerivative(false);
-  }, []);
+  }, [selectedRunId]);
 
   const livePlot = useCallback((traces: XYTrace[], title: string, stream: string, dataSubNode: string, dataNodeFamily: 'array' | 'table') => {
     setPanel({
