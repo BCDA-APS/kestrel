@@ -56,6 +56,8 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   const lastXRef = useRef('');
   const lastXWasMotorRef = useRef(false);
   const lastYRef = useRef<string[]>([]);
+  // Tracks which runId the current `fields` were loaded for; prevents stale-fields auto-select
+  const fieldsRunIdRef = useRef('');
   // True after we removed traces via onRemoveRunTraces, so the next Y check re-creates the panel
   const removedTracesRef = useRef(false);
   const [adding, setAdding] = useState(false);
@@ -111,6 +113,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     if (!serverUrl || catalog === null || !runId) return;
     setStreams([]);
     setSelectedStream('');
+    fieldsRunIdRef.current = '';
     fetch(`${serverUrl}/api/v1/search${catSeg(catalog)}/${runId}?page[limit]=50`)
       .then(r => r.json())
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -125,6 +128,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
 
   const fetchFields = useCallback(() => {
     if (!selectedStream) return;
+    fieldsRunIdRef.current = '';
     setLoading(true);
     setFields([]);
     setError('');
@@ -210,6 +214,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
           const tableColSet = new Set(tableStatus.cols);
           const imageExtras = searchArrays.filter(f => !tableColSet.has(f.name) && isImageField(f));
           setDataSubNode(''); setDataNodeFamily('table');
+          fieldsRunIdRef.current = runId;
           setFields([...tableFields, ...imageExtras]); return;
         }
 
@@ -241,6 +246,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
             .filter(f => !knownNames.has(f.name))
             .map(f => ({ ...f, subNode }));
           setDataSubNode(subNode || ''); setDataNodeFamily('array');
+          fieldsRunIdRef.current = runId;
           setFields([...searchArrays, ...taggedSub]); return;
         }
 
@@ -257,6 +263,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
             .filter(f => !tableColSet.has(f.name) && isImageField(f))
             .map(f => ({ ...f, subNode: '' }));
           setDataSubNode(tableItem.id); setDataNodeFamily('table');
+          fieldsRunIdRef.current = runId;
           setFields([...columns.map((col: string) => ({ name: col, shape: [], dtype: 'number' })), ...imageExtras]);
           return;
         }
@@ -276,6 +283,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
           const imageExtras = searchArrays.filter(f => !knownNames.has(f.name) || isImageField(f))
             .filter(f => !uniqueDataKeys.includes(f.name));
           setDataSubNode(subNode); setDataNodeFamily('array');
+          fieldsRunIdRef.current = runId;
           setFields([...metaFields, ...imageExtras]); return;
         }
 
@@ -316,6 +324,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
 
   // Auto-preselect X and Y: restore last user selection if it exists, else fall back to defaults
   useEffect(() => {
+    if (fieldsRunIdRef.current !== runId) { setYFields([]); setXField(''); return; }
     if (sortedFields.length === 0) return;
     const fieldNames = new Set(sortedFields.map(f => f.name));
 
@@ -352,7 +361,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
       setYFields(firstDet ? [firstDet.name] : []);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortedFields, runMotors, runDetectors, runHintsDetectors, detectorDefault]);
+  }, [sortedFields, runMotors, runDetectors, runHintsDetectors, detectorDefault, runId]);
 
   // In z-mode, emit the selected field whenever yFields[0] changes (auto-select or user click)
   useEffect(() => {
