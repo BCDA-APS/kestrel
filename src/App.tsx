@@ -45,7 +45,7 @@ const catSeg = (catalog: string | null) => catalog ? `/${catalog}` : '';
 
 async function fetchRunTraces(
   serverUrl: string, catalog: string, runId: string, runLabel: string,
-  detectors: string[], motors: string[],
+  detectors: string[], hintsDetectors: string[], motors: string[],
   preferX: string, preferYs: string[],
 ): Promise<XYTrace[]> {
   const matchesDev = (name: string, devs: string[]) => devs.some(d => name === d || name.startsWith(d + '_'));
@@ -92,6 +92,9 @@ async function fetchRunTraces(
   const validPreferYs = preferYs.filter(y => fieldSet.has(y) && y !== x);
   const ys = validPreferYs.length > 0 ? validPreferYs
     : (() => {
+        const hintsDets = hintsDetectors.length > 0 ? hintsDetectors : detectors;
+        const hintY = fieldNames.find(f => matchesDev(f, hintsDets) && f !== x);
+        if (hintY) return [hintY];
         const detY = fieldNames.find(f => matchesDev(f, detectors) && f !== x);
         if (detY) return [detY];
         const anyY = fieldNames.find(f => f !== x);
@@ -561,7 +564,7 @@ export default function App() {
     });
   }, []);
 
-  const handleShiftClickRun = useCallback(async (runId: string, label: string, detectors: string[], motors: string[]) => {
+  const handleShiftClickRun = useCallback(async (runId: string, label: string, detectors: string[], hintsDetectors: string[], motors: string[]) => {
     const currentPanel = panelRef.current;
     const hasGraph = currentPanel?.type === 'xy' && currentPanel.traces.length > 0;
     const preferX = hasGraph ? currentPanel!.traces[0].xLabel : '';
@@ -569,7 +572,7 @@ export default function App() {
     setAddRunId(runId);
     setAddRunError(null);
     try {
-      const traces = await fetchRunTraces(serverUrl, selectedCatalog ?? '', runId, label, detectors, motors, preferX, preferYs);
+      const traces = await fetchRunTraces(serverUrl, selectedCatalog ?? '', runId, label, detectors, hintsDetectors, motors, preferX, preferYs);
       if (hasGraph) {
         addTraces(traces);
       } else {
