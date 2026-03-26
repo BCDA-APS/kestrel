@@ -154,21 +154,23 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
         const isComplete = !!meta.data?.attributes?.metadata?.stop;
 
         const subPath = dataSubNode ? `/${dataSubNode}` : '';
-        let updated: typeof panel.traces;
+        // Only poll traces that belong to the live run; other runs' traces are shown as staticTraces
+        const liveRunTraces = tracesRef.current.filter(t => t.runId === runId);
+        let updated: XYTrace[];
         if (dataNodeFamily === 'table') {
           const resp = await fetch(`${serverUrl}/api/v1/table/full${cs}/${runId}/${stream}${subPath}?format=application/json`);
           if (!resp.ok) return;
           const table = await resp.json();
           const seqNums: number[] = table.seq_num ?? [];
           const nRows = seqNums.length > 0 ? (seqNums.findIndex(s => s === 0) === -1 ? seqNums.length : seqNums.findIndex(s => s === 0)) : undefined;
-          updated = tracesRef.current.map(trace => {
+          updated = liveRunTraces.map(trace => {
             const y = nRows !== undefined ? (table[trace.yLabel] ?? trace.y).slice(0, nRows) : (table[trace.yLabel] ?? trace.y);
             const x = nRows !== undefined ? (table[trace.xLabel] ?? trace.x).slice(0, nRows) : (table[trace.xLabel] ?? trace.x);
             return { ...trace, x, y };
           });
         } else {
           const base = `${serverUrl}/api/v1/array/full${cs}/${runId}/${stream}${subPath}`;
-          updated = await Promise.all(tracesRef.current.map(async (trace) => {
+          updated = await Promise.all(liveRunTraces.map(async (trace) => {
             const yr = await fetch(`${base}/${trace.yLabel}?format=application/json`);
             if (!yr.ok) return trace;
             const y: number[] = await yr.json();
