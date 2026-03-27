@@ -151,6 +151,8 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
         // Only poll traces that belong to the live run; other runs' traces are shown as staticTraces
         const liveRunTraces = tracesRef.current.filter(t => t.runId === runId);
         let updated: XYTrace[];
+        const applyI0 = (y: number[], i0: number[]) =>
+          y.map((v, i) => (i0[i] !== 0 && i0[i] != null ? v / i0[i] : v));
         if (dataNodeFamily === 'table') {
           const resp = await fetch(`${serverUrl}/api/v1/table/full${cs}/${runId}/${stream}${subPath}?format=application/json`);
           if (!resp.ok) return;
@@ -158,16 +160,30 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
           const seqNums: number[] = table.seq_num ?? [];
           const nRows = seqNums.length > 0 ? (seqNums.findIndex(s => s === 0) === -1 ? seqNums.length : seqNums.findIndex(s => s === 0)) : undefined;
           updated = liveRunTraces.map(trace => {
-            const y = nRows !== undefined ? (table[trace.yLabel] ?? trace.y).slice(0, nRows) : (table[trace.yLabel] ?? trace.y);
-            const x = nRows !== undefined ? (table[trace.xLabel] ?? trace.x).slice(0, nRows) : (table[trace.xLabel] ?? trace.x);
-            return { ...trace, x, y };
+            const rawField = trace.rawYLabel ?? trace.yLabel;
+            const slice = (arr: number[]) => nRows !== undefined ? arr.slice(0, nRows) : arr;
+            let yRaw: number[] = slice(table[rawField] ?? trace.y);
+            if (trace.i0Label) {
+              const i0Raw: number[] = slice(table[trace.i0Label] ?? []);
+              if (i0Raw.length > 0) yRaw = applyI0(yRaw, i0Raw);
+            }
+            const x = slice(table[trace.xLabel] ?? trace.x);
+            return { ...trace, x, y: yRaw };
           });
         } else {
           const base = `${serverUrl}/api/v1/array/full${cs}/${runId}/${stream}${subPath}`;
           updated = await Promise.all(liveRunTraces.map(async (trace) => {
-            const yr = await fetch(`${base}/${trace.yLabel}?format=application/json`);
+            const rawField = trace.rawYLabel ?? trace.yLabel;
+            const yr = await fetch(`${base}/${rawField}?format=application/json`);
             if (!yr.ok) return trace;
-            const y: number[] = await yr.json();
+            let y: number[] = await yr.json();
+            if (trace.i0Label) {
+              const i0r = await fetch(`${base}/${trace.i0Label}?format=application/json`);
+              if (i0r.ok) {
+                const i0Data: number[] = await i0r.json();
+                if (i0Data.length > 0) y = applyI0(y, i0Data);
+              }
+            }
             const xr = await fetch(`${base}/${trace.xLabel}?format=application/json`);
             if (!xr.ok) return trace;
             const x: number[] = await xr.json();

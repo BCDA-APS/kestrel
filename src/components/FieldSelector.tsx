@@ -419,7 +419,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
           let yArr: number[] = nRows !== undefined ? (table[yf] ?? []).slice(0, nRows) : (table[yf] ?? []);
           const xArr = nRows !== undefined ? (table[x] ?? []).slice(0, nRows) : (table[x] ?? []);
           if (i0 && i0Data.length > 0) yArr = applyI0(yArr, i0Data);
-          return { x: xArr, y: yArr, xLabel: x, yLabel: i0 ? `${yf}/I0` : yf, runLabel, runId };
+          return { x: xArr, y: yArr, xLabel: x, yLabel: i0 ? `${yf}/I0` : yf, ...(i0 ? { rawYLabel: yf, i0Label: i0 } : {}), runLabel, runId };
         });
       }
       // table/full failed — fall through to per-column array fetches
@@ -446,7 +446,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     }
     return ys.map((yf, idx) => {
       const y = i0 && i0Data.length > 0 ? applyI0(yDatas[idx], i0Data) : yDatas[idx];
-      return { x: xData, y, xLabel: x, yLabel: i0 ? `${yf}/I0` : yf, runLabel, runId };
+      return { x: xData, y, xLabel: x, yLabel: i0 ? `${yf}/I0` : yf, ...(i0 ? { rawYLabel: yf, i0Label: i0 } : {}), runLabel, runId };
     });
   };
 

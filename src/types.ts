@@ -3,6 +3,8 @@ export type XYTrace = {
   y: number[];
   xLabel: string;
   yLabel: string;
+  rawYLabel?: string;  // original field name before I0 normalization
+  i0Label?: string;    // I0 field name, set when normalization is active
   runLabel: string;
   runId: string;
 };
