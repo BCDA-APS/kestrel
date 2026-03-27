@@ -209,7 +209,7 @@ export default function App() {
   const [centerTab, setCenterTab] = useState<'graph' | 'data' | 'metadata' | 'summary'>('graph');
   const [appTab, setAppTab] = useState<'visualizer' | 'qserver'>('visualizer');
   const [splitView, setSplitView] = useState(false);
-  const [settings, setSettings] = useState<{ qserverEnabled?: boolean; detectorDefault?: 'smart' | 'hints' | 'last' }>(() => {
+  const [settings, setSettings] = useState<{ qserverEnabled?: boolean; detectorDefault?: 'smart' | 'hints' | 'last'; autoAddMax?: number }>(() => {
     try { return JSON.parse(localStorage.getItem('appSettings') ?? '{}'); } catch { return {}; }
   });
   const [showSettings, setShowSettings] = useState(false);
@@ -544,9 +544,13 @@ export default function App() {
           if (!prev || prev.type !== 'xy') return prev;
           const existingKeys = new Set(prev.traces.map(t => `${t.runId}|${t.xLabel}|${t.yLabel}`));
           const newTraces = traces.filter(t => !existingKeys.has(`${t.runId}|${t.xLabel}|${t.yLabel}`));
+          if (newTraces.length === 0) return prev;
+          const max = settings.autoAddMax ?? 10;
+          const combined = [...prev.traces, ...newTraces];
+          const trimmed = combined.length > max ? combined.slice(combined.length - max) : combined;
           return {
             ...prev,
-            traces: newTraces.length === 0 ? prev.traces : [...prev.traces, ...newTraces],
+            traces: trimmed,
             liveConfig: { serverUrl, catalog: selectedCatalog ?? '', stream, runId: selectedRunId, dataSubNode, dataNodeFamily },
           };
         });
@@ -904,6 +908,16 @@ export default function App() {
                     </span>
                   </label>
                 ))}
+                <p className="text-sky-400 text-[10px] font-medium uppercase tracking-wide mt-3 mb-1">Auto-add max traces</p>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="number" min={1} step={1}
+                    value={settings.autoAddMax ?? 10}
+                    onChange={e => updateSetting('autoAddMax', Math.max(1, Math.round(Number(e.target.value))))}
+                    className="w-16 text-xs border border-sky-700 rounded px-1.5 py-0.5 bg-sky-900 text-white focus:outline-none focus:border-sky-400"
+                  />
+                  <span className="text-white text-xs">oldest trace dropped when exceeded</span>
+                </label>
               </div>
             )}
           </div>
@@ -1079,6 +1093,16 @@ export default function App() {
                     </span>
                   </label>
                 ))}
+                <p className="text-sky-400 text-[10px] font-medium uppercase tracking-wide mt-3 mb-1">Auto-add max traces</p>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="number" min={1} step={1}
+                    value={settings.autoAddMax ?? 10}
+                    onChange={e => updateSetting('autoAddMax', Math.max(1, Math.round(Number(e.target.value))))}
+                    className="w-16 text-xs border border-sky-700 rounded px-1.5 py-0.5 bg-sky-900 text-white focus:outline-none focus:border-sky-400"
+                  />
+                  <span className="text-white text-xs">oldest trace dropped when exceeded</span>
+                </label>
               </div>
             )}
           </div>
