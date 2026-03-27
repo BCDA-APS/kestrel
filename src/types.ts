@@ -1,10 +1,3 @@
-export type DatasetPanel = {
-  id: string;
-  type: 'dataset';
-  url: string;
-  title: string;
-};
-
 export type XYTrace = {
   x: number[];
   y: number[];
@@ -29,7 +22,7 @@ export type XYPanel = {
   };
 };
 
-export type Panel = DatasetPanel | XYPanel;
+export type Panel = XYPanel;
 
 export type { FitResult } from './fitting';
 

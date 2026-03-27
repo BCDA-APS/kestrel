@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { PlotlyHeatmap, PlotlyScatter } from '@blueskyproject/finch';
-import { useTiledImage } from '../hooks/useTiledImage';
+import Plot from 'react-plotly.js';
 import type { Panel, XYTrace, TraceStyle } from '../types';
 import type { FitResult } from '../fitting';
 import { PLOTLY_COLORS, MARKER_ICONS, CURSOR_COLORS, DEFAULT_TRACE_STYLE } from '../constants';
@@ -58,7 +57,7 @@ function getEffectiveStyle(traceStyles: TraceStyle[] | undefined, i: number): Tr
   return { ...DEFAULT_TRACE_STYLE, ...s };
 }
 
-function traceMode(style: TraceStyle): string {
+function traceMode(style: TraceStyle): 'lines' | 'markers' | 'lines+markers' {
   const hasLine = style.lineDash !== 'none';
   const hasMark = style.markerSymbol !== 'none';
   if (hasLine && hasMark) return 'lines+markers';
@@ -66,9 +65,10 @@ function traceMode(style: TraceStyle): string {
   return 'lines';
 }
 
-function plotlyDash(lineDash: string): string {
+type Dash = 'solid' | 'dot' | 'dash' | 'longdash' | 'dashdot' | 'longdashdot';
+function plotlyDash(lineDash: string): Dash {
   if (lineDash === 'none') return 'solid';
-  return lineDash;
+  return lineDash as Dash;
 }
 
 function TraceChip({ t, i: _i, style, color, onRemove }: {
@@ -109,34 +109,20 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
   // Reset zoom when panel changes
   useEffect(() => { setLiveTraces(null); setXRange(undefined); setYRange(undefined); }, [panel.id]);
 
-  // Track user zoom via plotly_relayout
-  useEffect(() => {
-    let plotDiv: any = null;
-    const handler = (e: any) => {
-      if (e['xaxis.autorange'] || e['yaxis.autorange']) {
-        setXRange(undefined); setYRange(undefined); return;
-      }
-      if (e['xaxis.range[0]'] !== undefined) {
-        const x0 = e['xaxis.range[0]'], x1 = e['xaxis.range[1]'];
-        setXRange(prev => (prev && prev[0] === x0 && prev[1] === x1) ? prev : [x0, x1]);
-      }
-      if (e['yaxis.range[0]'] !== undefined) {
-        const y0 = e['yaxis.range[0]'], y1 = e['yaxis.range[1]'];
-        setYRange(prev => (prev && prev[0] === y0 && prev[1] === y1) ? prev : [y0, y1]);
-      }
-    };
-    // Plot div may not exist immediately; retry briefly
-    const tryAttach = () => {
-      plotDiv = wrapperRef.current?.querySelector('.js-plotly-plot') as any;
-      if (plotDiv?.on) { plotDiv.on('plotly_relayout', handler); return true; }
-      return false;
-    };
-    if (!tryAttach()) {
-      const t = setTimeout(tryAttach, 300);
-      return () => clearTimeout(t);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleRelayout = useCallback((e: any) => {
+    if (e['xaxis.autorange'] || e['yaxis.autorange']) {
+      setXRange(undefined); setYRange(undefined); return;
     }
-    return () => { plotDiv?.removeListener?.('plotly_relayout', handler); };
-  }, [panel.id]);
+    if (e['xaxis.range[0]'] !== undefined) {
+      const x0 = e['xaxis.range[0]'], x1 = e['xaxis.range[1]'];
+      setXRange(prev => (prev && prev[0] === x0 && prev[1] === x1) ? prev : [x0, x1]);
+    }
+    if (e['yaxis.range[0]'] !== undefined) {
+      const y0 = e['yaxis.range[0]'], y1 = e['yaxis.range[1]'];
+      setYRange(prev => (prev && prev[0] === y0 && prev[1] === y1) ? prev : [y0, y1]);
+    }
+  }, []);
 
   const liveConfig = panel.liveConfig;
   useEffect(() => {
@@ -282,7 +268,7 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
           onMouseDown={handleMouseDown}
           style={{ cursor: 'crosshair' }}
         >
-          <PlotlyScatter
+          <Plot
             data={[
               // Data traces
               ...displayTraces.map((t, ti) => {
@@ -293,7 +279,7 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
                   x: order.map(i => t.x[i]),
                   y: order.map(i => t.y[i]),
                   mode: traceMode(style),
-                  type: 'scatter',
+                  type: 'scatter' as const,
                   name: t.runId.startsWith('__deriv__') ? t.yLabel : `${t.runLabel} (${t.runId.slice(0, 7)}) - ${t.yLabel}`,
                   showlegend: false,
                   line: {
@@ -311,39 +297,48 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
               // Cursor 1 — cross marker
               ...(cursor1 != null && cursor1Y != null ? [{
                 x: [cursor1], y: [cursor1Y],
-                mode: 'markers', type: 'scatter', name: 'C1',
-                showlegend: false, hoverinfo: 'skip',
+                mode: 'markers' as const, type: 'scatter' as const, name: 'C1',
+                showlegend: false, hoverinfo: 'skip' as const,
                 marker: { symbol: 'cross-thin', size: 20, color: CURSOR_COLORS[0], line: { color: CURSOR_COLORS[0], width: 1.5 } },
               }] : []),
               // Cursor 2 — cross marker
               ...(cursor2 != null && cursor2Y != null ? [{
                 x: [cursor2], y: [cursor2Y],
-                mode: 'markers', type: 'scatter', name: 'C2',
-                showlegend: false, hoverinfo: 'skip',
+                mode: 'markers' as const, type: 'scatter' as const, name: 'C2',
+                showlegend: false, hoverinfo: 'skip' as const,
                 marker: { symbol: 'cross-thin', size: 20, color: CURSOR_COLORS[1], line: { color: CURSOR_COLORS[1], width: 1.5 } },
               }] : []),
               // Fit result
               ...(fitResults ? [{
                 x: fitResults.xFit, y: fitResults.yFit,
-                mode: 'lines', type: 'scatter',
+                mode: 'lines' as const, type: 'scatter' as const,
                 name: `Fit (${fitResults.model})`,
-                line: { dash: 'dash', width: 2, color: '#ef4444' },
+                line: { dash: 'dash' as const, width: 2, color: '#ef4444' },
                 showlegend: false,
               }] : []),
             ]}
-            xAxisTitle={xAxisTitle}
-            yAxisTitle={yAxisTitle}
-            xAxisRange={xRange}
-            yAxisRange={yRange}
-            xAxisLayout={xLog || showCrosshair ? {
-              ...(xLog ? { type: 'log' } : {}),
-              ...(showCrosshair ? { showspikes: true, spikemode: 'across', spikethickness: 1, spikecolor: '#9ca3af', spikedash: 'solid' } : {}),
-            } : undefined}
-            yAxisLayout={yLog || showCrosshair ? {
-              ...(yLog ? { type: 'log' } : {}),
-              ...(showCrosshair ? { showspikes: true, spikemode: 'across', spikethickness: 1, spikecolor: '#9ca3af', spikedash: 'solid' } : {}),
-            } : undefined}
-            className="w-full h-full"
+            layout={{
+              autosize: true,
+              margin: { l: 60, r: 30, t: 30, b: 70 },
+              paper_bgcolor: 'white',
+              plot_bgcolor: 'white',
+              xaxis: {
+                title: { text: xAxisTitle, font: { size: 12, color: '#7f7f7f' } },
+                range: xRange,
+                ...(xLog ? { type: 'log' as const } : {}),
+                ...(showCrosshair ? { showspikes: true, spikemode: 'across', spikethickness: 1, spikecolor: '#9ca3af', spikedash: 'solid' } : {}),
+              },
+              yaxis: {
+                title: { text: yAxisTitle, font: { size: 12, color: '#7f7f7f' } },
+                range: yRange,
+                ...(yLog ? { type: 'log' as const } : {}),
+                ...(showCrosshair ? { showspikes: true, spikemode: 'across', spikethickness: 1, spikecolor: '#9ca3af', spikedash: 'solid' } : {}),
+              },
+            }}
+            onRelayout={handleRelayout}
+            useResizeHandler
+            style={{ width: '100%', height: '100%' }}
+            config={{ responsive: true }}
           />
         </div>
       </div>
@@ -351,92 +346,6 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
   );
 }
 
-function DatasetPanelContent({ panel, onRemove }: VisualizationPanelProps & { panel: Extract<Panel, { type: 'dataset' }> }) {
-  const { array, line, metadata, zIndex, setZIndex, loading, error } = useTiledImage(panel.url);
-  const leadingShape = metadata ? metadata.shape.slice(0, -2) : [];
-  const totalFrames = leadingShape.reduce((a, b) => a * b, 1);
-  const is3D = totalFrames > 1;
-  const zMax = Math.max(0, totalFrames - 1);
-
-  return (
-    <PanelShell
-      title={panel.title}
-      id={panel.id}
-      onRemove={onRemove}
-      badge={metadata && (
-        <span className="text-xs text-gray-400 shrink-0">
-          [{metadata.shape.join(' × ')}]
-        </span>
-      )}
-      footer={is3D ? (
-        <div className="px-4 py-2 border-t border-gray-100 flex items-center gap-3 shrink-0">
-          <span className="text-xs font-medium text-gray-500">Z</span>
-          <input
-            type="range" min={0} max={zMax} value={zIndex}
-            onChange={(e) => setZIndex(Number(e.target.value))}
-            className="flex-1 accent-sky-600"
-          />
-          <span className="text-xs text-gray-500 w-12 text-right">{zIndex} / {zMax}</span>
-        </div>
-      ) : undefined}
-    >
-      {loading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-white/70 z-10">
-          <div className="flex flex-col items-center gap-2 text-gray-500">
-            <svg className="animate-spin h-6 w-6" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-            </svg>
-            <span className="text-sm">Loading...</span>
-          </div>
-        </div>
-      )}
-
-      {error && !loading && (
-        <div className="flex flex-col items-center gap-2 px-6 text-center">
-          <svg className="h-8 w-8 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-              d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-          </svg>
-          <p className="text-sm text-red-500 font-medium">Failed to load</p>
-          <p className="text-xs text-gray-400">{error}</p>
-        </div>
-      )}
-
-      {line && (
-        <div className="w-full h-full">
-          <PlotlyScatter
-            data={[{ y: line, mode: 'lines', type: 'scatter' }]}
-            xAxisTitle={metadata?.dims?.[metadata.dims.length - 1] ?? 'Index'}
-            yAxisTitle="Value"
-            className="w-full h-full"
-          />
-        </div>
-      )}
-
-      {array && (
-        <div className="w-full h-full">
-          <PlotlyHeatmap
-            array={array}
-            colorScale="Viridis"
-            showScale
-            lockPlotHeightToParent
-            xAxisTitle={metadata?.dims?.[metadata.dims.length - 1] ?? 'X'}
-            yAxisTitle={metadata?.dims?.[metadata.dims.length - 2] ?? 'Y'}
-          />
-        </div>
-      )}
-
-      {!line && !array && !loading && !error && (
-        <p className="text-sm text-gray-400">Fetching dataset...</p>
-      )}
-    </PanelShell>
-  );
-}
-
 export default function VisualizationPanel({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTracesUpdate, extraTraces, onRemoveExtraTrace, xLog, yLog, fitResults, traceStyles, cursor1, cursor2, cursor1Y, cursor2Y, onPlotClick, showCrosshair, showWaterfall, waterfallOffset }: VisualizationPanelProps) {
-  if (panel.type === 'xy') {
-    return <XYPanelContent panel={panel} onRemove={onRemove} onRemoveTrace={onRemoveTrace} onStopLive={onStopLive} onLiveTracesUpdate={onLiveTracesUpdate} extraTraces={extraTraces} onRemoveExtraTrace={onRemoveExtraTrace} xLog={xLog} yLog={yLog} fitResults={fitResults} traceStyles={traceStyles} cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y} onPlotClick={onPlotClick} showCrosshair={showCrosshair} showWaterfall={showWaterfall} waterfallOffset={waterfallOffset} />;
-  }
-  return <DatasetPanelContent panel={panel} onRemove={onRemove} />;
+  return <XYPanelContent panel={panel} onRemove={onRemove} onRemoveTrace={onRemoveTrace} onStopLive={onStopLive} onLiveTracesUpdate={onLiveTracesUpdate} extraTraces={extraTraces} onRemoveExtraTrace={onRemoveExtraTrace} xLog={xLog} yLog={yLog} fitResults={fitResults} traceStyles={traceStyles} cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y} onPlotClick={onPlotClick} showCrosshair={showCrosshair} showWaterfall={showWaterfall} waterfallOffset={waterfallOffset} />;
 }
