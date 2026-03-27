@@ -22,6 +22,8 @@ type RunTableProps = {
   page: number;
   selectedRunId?: string;
   autoFollow?: boolean;
+  autoAdd?: boolean;
+  onAutoAddChange?: (v: boolean) => void;
   onPageChange: (page: number) => void;
   onSelectRun: (runId: string, label: string, detectors: string[], hintsDetectors: string[], motors: string[], acquiring: boolean) => void;
   onDoubleClickRun?: (runId: string, label: string, detectors: string[], hintsDetectors: string[], motors: string[], acquiring: boolean) => void;
@@ -193,7 +195,7 @@ function DualRangeSlider({ minMs, maxMs, fromMs, toMs, onFromChange, onToChange 
   );
 }
 
-export default function RunTable({ serverUrl, catalog, page, selectedRunId, autoFollow, onPageChange, onSelectRun, onDoubleClickRun, onShiftClickRun, loadingRunId, addRunError, onAutoFollowChange, onNewAcquiringRun }: RunTableProps) {
+export default function RunTable({ serverUrl, catalog, page, selectedRunId, autoFollow, autoAdd, onAutoAddChange, onPageChange, onSelectRun, onDoubleClickRun, onShiftClickRun, loadingRunId, addRunError, onAutoFollowChange, onNewAcquiringRun }: RunTableProps) {
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -429,6 +431,20 @@ export default function RunTable({ serverUrl, catalog, page, selectedRunId, auto
             title={autoFollow ? 'Auto-follow on — auto-plots new runs' : 'Auto-follow off — click to enable'}
           >
             {autoFollow ? '● Auto' : '○ Auto'}
+          </button>
+        )}
+        {autoFollow && (
+          <button
+            onClick={() => onAutoAddChange?.(!autoAdd)}
+            className={`px-2 py-0.5 text-xs rounded font-medium border transition-colors ${
+              autoAdd ? 'bg-emerald-100 text-emerald-700 border-emerald-400' : 'bg-white text-gray-400 border-gray-300 hover:text-gray-600'
+            }`}
+            title={autoAdd
+              ? 'Auto-add on — new scans with the same positioner and detector are added to the current plot instead of replacing it'
+              : 'Auto-add off — click to accumulate scans with matching positioner and detector'
+            }
+          >
+            {autoAdd ? '● +Add' : '○ +Add'}
           </button>
         )}
         <button

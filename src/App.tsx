@@ -185,6 +185,9 @@ export default function App() {
   const pendingGridHeatmapRef = useRef(false);
   const [runPage, setRunPage] = useState(0);
   const [autoFollow, setAutoFollow] = useState(false);
+  const [autoAdd, setAutoAdd] = useState(false);
+  const autoAddRef = useRef(false);
+  useEffect(() => { autoAddRef.current = autoAdd; }, [autoAdd]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [analysisCollapsed, setAnalysisCollapsed] = useState(false);
   const [analysisWidth, setAnalysisWidth] = useState(260);
@@ -530,6 +533,27 @@ export default function App() {
   }, [selectedRunId]);
 
   const livePlot = useCallback((traces: XYTrace[], title: string, stream: string, dataSubNode: string, dataNodeFamily: 'array' | 'table') => {
+    const existing = panelRef.current;
+    if (autoAddRef.current && existing?.type === 'xy' && traces.length > 0) {
+      const newX = traces[0].xLabel;
+      const newY = traces[0].yLabel;
+      const exX = existing.traces[0]?.xLabel;
+      const exY = existing.traces[0]?.yLabel;
+      if (newX === exX && newY === exY) {
+        setPanel(prev => {
+          if (!prev || prev.type !== 'xy') return prev;
+          const existingKeys = new Set(prev.traces.map(t => `${t.runId}|${t.xLabel}|${t.yLabel}`));
+          const newTraces = traces.filter(t => !existingKeys.has(`${t.runId}|${t.xLabel}|${t.yLabel}`));
+          return {
+            ...prev,
+            traces: newTraces.length === 0 ? prev.traces : [...prev.traces, ...newTraces],
+            liveConfig: { serverUrl, catalog: selectedCatalog ?? '', stream, runId: selectedRunId, dataSubNode, dataNodeFamily },
+          };
+        });
+        setFitResults(null);
+        return;
+      }
+    }
     setPanel({
       id: crypto.randomUUID(), type: 'xy' as const, traces, title,
       liveConfig: { serverUrl, catalog: selectedCatalog ?? '', stream, runId: selectedRunId, dataSubNode, dataNodeFamily },
@@ -1085,6 +1109,8 @@ export default function App() {
                   page={runPage}
                   selectedRunId={selectedRunId}
                   autoFollow={autoFollow}
+                  autoAdd={autoAdd}
+                  onAutoAddChange={setAutoAdd}
                   onPageChange={setRunPage}
                   onSelectRun={(id, label, dets, hintsDets, motors, acquiring) => {
                     if (id === selectedRunId && acquiring) {
