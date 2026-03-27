@@ -104,6 +104,7 @@ function drawFrame(
   crossCol: number | null,
   vp: Viewport,
   colorFn: (t: number) => RGB,
+  thickness = 1,
 ) {
   const nRows = frame.length;
   const nCols = frame[0]?.length ?? 0;
@@ -143,6 +144,23 @@ function drawFrame(
   if (crossRow !== null && crossCol !== null) {
     const cx = ((crossCol + 0.5 - c0) / colSpan) * w;
     const cy = ((crossRow + 0.5 - r0) / rowSpan) * h;
+    if (thickness > 1) {
+      const half = Math.floor(thickness / 2);
+      // half + 0.5 converts from pixel count to edge-aligned canvas coords
+      const bandHalfH = (half + 0.5) / rowSpan * h;
+      const bandHalfW = (half + 0.5) / colSpan * w;
+      ctx.fillStyle = 'rgba(255,255,255,0.12)';
+      ctx.fillRect(0, cy - bandHalfH, w, 2 * bandHalfH);
+      ctx.fillRect(cx - bandHalfW, 0, 2 * bandHalfW, h);
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.moveTo(0, cy - bandHalfH); ctx.lineTo(w, cy - bandHalfH); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, cy + bandHalfH); ctx.lineTo(w, cy + bandHalfH); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx - bandHalfW, 0); ctx.lineTo(cx - bandHalfW, h); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx + bandHalfW, 0); ctx.lineTo(cx + bandHalfW, h); ctx.stroke();
+      ctx.setLineDash([]);
+    }
     ctx.strokeStyle = 'rgba(255,255,255,0.85)';
     ctx.lineWidth = 1.5;
     if (cy >= 0 && cy <= h) { ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.stroke(); }
@@ -163,6 +181,7 @@ export default function ImagePanel({ serverUrl, catalog, runId, stream, dataSubN
   const [viewport, setViewport] = useState<Viewport | null>(null);
   const [crossRow, setCrossRow] = useState<number | null>(null);
   const [crossCol, setCrossCol] = useState<number | null>(null);
+  const [profileThickness, setProfileThickness] = useState(1);
   const [selBox, setSelBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [colSplit, setColSplit] = useState(() => { const s = parseFloat(localStorage.getItem('heatmapColSplit') ?? ''); return isNaN(s) ? 60 : s; });
   const [rowSplit, setRowSplit] = useState(() => { const s = parseFloat(localStorage.getItem('heatmapRowSplit') ?? ''); return isNaN(s) ? 60 : s; });
@@ -229,19 +248,35 @@ export default function ImagePanel({ serverUrl, catalog, runId, stream, dataSubN
 
   const horizCut = useMemo(() => {
     if (crossRow === null || !currentFrame) return null;
-    const y = currentFrame[crossRow] ?? [];
+    const half = Math.floor(profileThickness / 2);
+    const r0 = Math.max(0, crossRow - half);
+    const r1 = Math.min(currentFrame.length - 1, crossRow + half);
+    const count = r1 - r0 + 1;
+    const y = Array.from({ length: W }, (_, col) => {
+      let sum = 0;
+      for (let r = r0; r <= r1; r++) sum += currentFrame[r]?.[col] ?? 0;
+      return sum / count;
+    });
     let mn = Infinity, mx = -Infinity;
     for (const v of y) { if (v < mn) mn = v; if (v > mx) mx = v; }
     return { x: Array.from({ length: W }, (_, i) => i), y, yMin: mn, yMax: mx };
-  }, [crossRow, currentFrame, W]);
+  }, [crossRow, currentFrame, W, profileThickness]);
 
   const vertCut = useMemo(() => {
     if (crossCol === null || !currentFrame) return null;
-    const y = currentFrame.map(row => row[crossCol]);
+    const half = Math.floor(profileThickness / 2);
+    const c0 = Math.max(0, crossCol - half);
+    const c1 = Math.min((currentFrame[0]?.length ?? 0) - 1, crossCol + half);
+    const count = c1 - c0 + 1;
+    const y = currentFrame.map(row => {
+      let sum = 0;
+      for (let c = c0; c <= c1; c++) sum += row[c] ?? 0;
+      return sum / count;
+    });
     let mn = Infinity, mx = -Infinity;
     for (const v of y) { if (v < mn) mn = v; if (v > mx) mx = v; }
     return { x: Array.from({ length: H }, (_, i) => i), y, yMin: mn, yMax: mx };
-  }, [crossCol, currentFrame, H]);
+  }, [crossCol, currentFrame, H, profileThickness]);
 
   // Draw
   useEffect(() => {
@@ -249,10 +284,10 @@ export default function ImagePanel({ serverUrl, catalog, runId, stream, dataSubN
     if (!canvas || !currentFrame) return;
     const palette = COLORMAPS[colormap] ?? COLORMAPS.viridis;
     const colorFn = (t: number) => interpolateColor(palette, t);
-    drawFrame(canvas, currentFrame, crossRow, crossCol, vpRef.current, colorFn);
+    drawFrame(canvas, currentFrame, crossRow, crossCol, vpRef.current, colorFn, profileThickness);
     const tc = ticksCanvasRef.current;
     if (tc) drawTicks(tc, vpRef.current, H, W, colorFn, zMin, zMax);
-  }, [currentFrame, crossRow, crossCol, viewport, colormap, H, W, zMin, zMax]);
+  }, [currentFrame, crossRow, crossCol, viewport, colormap, H, W, zMin, zMax, profileThickness]);
 
   // Resize observer
   useEffect(() => {
@@ -272,13 +307,13 @@ export default function ImagePanel({ serverUrl, catalog, runId, stream, dataSubN
       if (frame) {
         const palette = COLORMAPS[colormap] ?? COLORMAPS.viridis;
         const colorFn = (t: number) => interpolateColor(palette, t);
-        drawFrame(canvas, frame, crossRow, crossCol, vpRef.current, colorFn);
+        drawFrame(canvas, frame, crossRow, crossCol, vpRef.current, colorFn, profileThickness);
         if (tc) drawTicks(tc, vpRef.current, H, W, colorFn, zMin, zMax);
       }
     });
     obs.observe(container);
     return () => obs.disconnect();
-  }, [frameCache, frameIdx, colormap, crossRow, crossCol, H, W, zMin, zMax]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [frameCache, frameIdx, colormap, crossRow, crossCol, H, W, zMin, zMax, profileThickness]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Split drag
   useEffect(() => {
@@ -419,10 +454,6 @@ export default function ImagePanel({ serverUrl, catalog, runId, stream, dataSubN
         >
           {Object.keys(COLORMAPS).map(c => <option key={c} value={c}>{c}</option>)}
         </select>
-        <span className="text-gray-400">scroll/⇧drag to zoom · drag to pan · click for crosshair</span>
-        {isZoomed && (
-          <button onClick={() => setViewport(null)} className="text-sky-600 hover:text-sky-800 underline">reset zoom</button>
-        )}
         {crossRow !== null && crossCol !== null && (
           <span className="font-mono text-sky-600">
             row={crossRow} · col={crossCol}
@@ -433,8 +464,20 @@ export default function ImagePanel({ serverUrl, catalog, runId, stream, dataSubN
             )}
           </span>
         )}
+        {crossRow !== null && crossCol !== null && <label className="flex items-center gap-1 text-gray-500">
+          binning
+          <input
+            type="number" min={1} step={1} value={profileThickness}
+            onChange={e => setProfileThickness(Math.max(1, Math.round(Number(e.target.value))))}
+            className="w-14 border border-gray-200 rounded px-1.5 py-0.5 text-xs text-gray-700 bg-white"
+          />
+        </label>}
+        <span className="text-gray-400 ml-auto">scroll/⇧drag to zoom · drag to pan · click for crosshair</span>
+        {isZoomed && (
+          <button onClick={() => setViewport(null)} className="text-sky-600 hover:text-sky-800 underline">reset zoom</button>
+        )}
         {onClose && (
-          <button onClick={onClose} className="ml-auto text-gray-400 hover:text-gray-600 text-xl leading-none" aria-label="Close">×</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none" aria-label="Close">×</button>
         )}
       </div>
 
