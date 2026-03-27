@@ -202,7 +202,6 @@ export default function App() {
   const [activeTraceIndex, setActiveTraceIndex] = useState(0);
   const [fitResults, setFitResults] = useState<FitResult | null>(null);
   const [showDerivative, setShowDerivative] = useState(false);
-  const [normalizeDerivative, setNormalizeDerivative] = useState(false);
   const [smoothingWindow, setSmoothingWindow] = useState(1);
   const [showWaterfall, setShowWaterfall] = useState(false);
   const [waterfallOffset, setWaterfallOffset] = useState(0);
@@ -336,20 +335,14 @@ export default function App() {
       return;
     }
     const deriv = computeDerivative(derivSource.x, derivSource.y, smoothingWindow);
-    let y = deriv.y;
-    if (normalizeDerivative) {
-      const srcMax = Math.max(...derivSource.y.map(Math.abs));
-      const drvMax = Math.max(...y.map(Math.abs));
-      if (drvMax > 0 && srcMax > 0) y = y.map(v => v * srcMax / drvMax);
-    }
     setDerivativeTraces([{
-      x: deriv.x, y,
+      x: deriv.x, y: deriv.y,
       xLabel: derivSource.xLabel,
-      yLabel: `d/dx${normalizeDerivative ? ' (norm.)' : ''} (${derivSource.runLabel} - ${derivSource.yLabel})`,
+      yLabel: `d/dx (${derivSource.runLabel} - ${derivSource.yLabel})`,
       runLabel: derivSource.runLabel,
       runId: `__deriv__:${derivSource.runId}`,
     }]);
-  }, [showDerivative, normalizeDerivative, smoothingWindow, derivSource]);
+  }, [showDerivative, smoothingWindow, derivSource]);
 
   const allTraces = [...realTraces, ...derivativeTraces];
   const activeTrace = allTraces[Math.min(activeTraceIndex, allTraces.length - 1)] ?? null;
@@ -1336,7 +1329,6 @@ export default function App() {
                 activeTraceIndex={activeTraceIndex} onActiveTraceIndexChange={handleActiveTraceIndexChange}
                 activeX={activeTrace?.x ?? []} activeY={activeTrace?.y ?? []}
                 showDerivative={showDerivative} onShowDerivativeChange={setShowDerivative}
-                normalizeDerivative={normalizeDerivative} onNormalizeDerivativeChange={setNormalizeDerivative}
                 smoothingWindow={smoothingWindow} onSmoothingWindowChange={setSmoothingWindow}
                 fitModel={fitModel} onFitModelChange={m => { setFitModel(m); localStorage.setItem('fitModel', m); setFitResults(null); }}
                 fitResults={fitResults} onFit={handleFit} onClearFit={() => setFitResults(null)}
@@ -1445,7 +1437,6 @@ export default function App() {
                 activeTraceIndex={activeTraceIndex} onActiveTraceIndexChange={handleActiveTraceIndexChange}
                 activeX={activeTrace?.x ?? []} activeY={activeTrace?.y ?? []}
                 showDerivative={showDerivative} onShowDerivativeChange={setShowDerivative}
-                normalizeDerivative={normalizeDerivative} onNormalizeDerivativeChange={setNormalizeDerivative}
                 smoothingWindow={smoothingWindow} onSmoothingWindowChange={setSmoothingWindow}
                 fitModel={fitModel} onFitModelChange={m => { setFitModel(m); localStorage.setItem('fitModel', m); setFitResults(null); }}
                 fitResults={fitResults} onFit={handleFit} onClearFit={() => setFitResults(null)}

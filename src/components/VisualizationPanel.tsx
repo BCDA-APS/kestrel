@@ -193,7 +193,10 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
     ? rawDisplayTraces.map((t, i) => ({ ...t, y: t.y.map(v => v + i * waterfallOffset) }))
     : rawDisplayTraces;
   const xAxisTitle = displayTraces[0]?.xLabel ?? '';
-  const yAxisTitle = displayTraces.length === 1 ? displayTraces[0].yLabel : 'Value';
+  const nonDerivTraces = displayTraces.filter(t => !t.runId.startsWith('__deriv__'));
+  const derivTraces = displayTraces.filter(t => t.runId.startsWith('__deriv__'));
+  const yAxisTitle = nonDerivTraces.length === 1 ? nonDerivTraces[0].yLabel : 'Value';
+  const hasDerivative = derivTraces.length > 0;
 
   const extractPlotCoords = (e: React.MouseEvent<HTMLDivElement>): [number, number] | null => {
     const plotDiv = wrapperRef.current?.querySelector('.js-plotly-plot') as any;
@@ -275,12 +278,14 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
                 const order = t.x.map((_, i) => i).sort((a, b) => t.x[a] - t.x[b]);
                 const style = getEffectiveStyle(traceStyles, ti);
                 const color = style.color || PLOTLY_COLORS[ti % PLOTLY_COLORS.length];
+                const isDerivative = t.runId.startsWith('__deriv__');
                 return {
                   x: order.map(i => t.x[i]),
                   y: order.map(i => t.y[i]),
                   mode: traceMode(style),
                   type: 'scatter' as const,
-                  name: t.runId.startsWith('__deriv__') ? t.yLabel : `${t.runLabel} (${t.runId.slice(0, 7)}) - ${t.yLabel}`,
+                  name: isDerivative ? t.yLabel : `${t.runLabel} (${t.runId.slice(0, 7)}) - ${t.yLabel}`,
+                  yaxis: isDerivative ? 'y2' as const : 'y' as const,
                   showlegend: false,
                   line: {
                     width: style.lineDash !== 'none' ? style.lineWidth : 0,
@@ -334,6 +339,14 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
                 ...(yLog ? { type: 'log' as const } : {}),
                 ...(showCrosshair ? { showspikes: true, spikemode: 'across', spikethickness: 1, spikecolor: '#9ca3af', spikedash: 'solid' } : {}),
               },
+              ...(hasDerivative ? {
+                yaxis2: {
+                  title: { text: 'd/dx', font: { size: 12, color: '#7f7f7f' } },
+                  overlaying: 'y' as const,
+                  side: 'right' as const,
+                },
+                margin: { l: 60, r: 60, t: 30, b: 70 },
+              } : {}),
             }}
             onRelayout={handleRelayout}
             useResizeHandler

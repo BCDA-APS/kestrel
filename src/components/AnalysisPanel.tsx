@@ -19,8 +19,6 @@ type AnalysisPanelProps = {
   activeY: number[];
   showDerivative: boolean;
   onShowDerivativeChange: (v: boolean) => void;
-  normalizeDerivative: boolean;
-  onNormalizeDerivativeChange: (v: boolean) => void;
   smoothingWindow: number;
   onSmoothingWindowChange: (n: number) => void;
   fitModel: string;
@@ -207,7 +205,7 @@ export default function AnalysisPanel({
   xLog, yLog, onXLogChange, onYLogChange,
   hasXYPanel, xyTraces, activeTraceIndex, onActiveTraceIndexChange,
   activeX, activeY,
-  showDerivative, onShowDerivativeChange, normalizeDerivative, onNormalizeDerivativeChange, smoothingWindow, onSmoothingWindowChange,
+  showDerivative, onShowDerivativeChange, smoothingWindow, onSmoothingWindowChange,
   fitModel, onFitModelChange, fitResults,
   onFit, onClearFit,
   cursor1, cursor2, cursor1Y, cursor2Y,
@@ -390,15 +388,6 @@ export default function AnalysisPanel({
                     className="w-16 text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-sky-400"
                   />
                   <span className="text-xs text-gray-400">pts</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={normalizeDerivative}
-                    onChange={e => onNormalizeDerivativeChange(e.target.checked)}
-                    className="accent-sky-600 w-3.5 h-3.5"
-                  />
-                  <span className="text-xs text-gray-700">Normalize to source scale</span>
                 </label>
               </>
             )}
