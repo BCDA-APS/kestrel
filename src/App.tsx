@@ -526,6 +526,7 @@ export default function App() {
     }));
     setFitResults(null);
     setShowDerivative(false);
+    setShowWaterfall(false);
   }, [selectedRunId]);
 
   const livePlot = useCallback((traces: XYTrace[], title: string, stream: string, dataSubNode: string, dataNodeFamily: 'array' | 'table') => {
@@ -535,6 +536,7 @@ export default function App() {
     });
     setFitResults(null);
     setShowDerivative(false);
+    setShowWaterfall(false);
   }, [serverUrl, selectedCatalog, selectedRunId]);
 
   const stopLive = useCallback(() => {
