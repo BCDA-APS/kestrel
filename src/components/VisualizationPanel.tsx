@@ -257,7 +257,12 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
                 onRemove={
                   t.runId.startsWith('__deriv__') ? onRemoveExtraTrace
                   : !liveConfig ? () => onRemoveTrace?.(i)
-                  : undefined
+                  : !liveKeys.has(`${t.runId}|${t.xLabel}|${t.yLabel}`)
+                    ? () => {
+                        const idx = panel.traces.findIndex(pt => pt.runId === t.runId && pt.xLabel === t.xLabel && pt.yLabel === t.yLabel);
+                        if (idx >= 0) onRemoveTrace?.(idx);
+                      }
+                    : undefined
                 }
               />
             );
