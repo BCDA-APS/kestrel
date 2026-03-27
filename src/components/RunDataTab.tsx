@@ -85,8 +85,7 @@ export default function RunDataTab({ serverUrl, catalog, runId }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [scanId, setScanId] = useState<number | null>(null);
-
-  useEffect(() => {
+useEffect(() => {
     setScanId(null);
     if (!serverUrl || !runId) return;
     fetch(`${serverUrl}/api/v1/metadata${catSeg(catalog)}/${runId}`)
@@ -189,18 +188,33 @@ export default function RunDataTab({ serverUrl, catalog, runId }: Props) {
   const thCls = 'sticky top-0 z-10 px-3 py-1.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide bg-gray-50 border-b border-gray-200 whitespace-nowrap';
   const tdCls = 'px-3 py-1 text-xs text-gray-700 border-b border-gray-100 whitespace-nowrap font-mono';
 
+  const isTransposed = activeStream === 'baseline';
+
+  const formatCell = (col: string, v: unknown) =>
+    col === 'time' && typeof v === 'number'
+      ? new Date(v * 1000).toLocaleString(undefined, { timeZoneName: 'short' })
+      : typeof v === 'number'
+        ? (Number.isInteger(v) ? String(v) : v.toPrecision(6))
+        : String(v ?? '');
+
   const handleExportCsv = () => {
-    const header = columns.join(',');
-    const rows = rowOrder.map(i =>
-      columns.map(col => {
-        const v = (data[col] as unknown[])[i];
-        const s = col === 'time' && typeof v === 'number'
-          ? new Date(v * 1000).toLocaleString(undefined, { timeZoneName: 'short' })
-          : String(v ?? '');
-        return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
-      }).join(',')
-    );
-    const csv = [header, ...rows].join('\n');
+    const escape = (s: string) =>
+      s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+    let csv: string;
+    if (isTransposed) {
+      const colHeaders = rowOrder.length === 1 ? ['Start'] : ['Start', 'Stop'];
+      const header = ['Field', ...colHeaders].map(escape).join(',');
+      const rows = columns.map(col =>
+        [col, ...rowOrder.map(ri => formatCell(col, (data[col] as unknown[])[ri]))].map(escape).join(',')
+      );
+      csv = [header, ...rows].join('\n');
+    } else {
+      const header = columns.map(escape).join(',');
+      const rows = rowOrder.map(i =>
+        columns.map(col => escape(formatCell(col, (data[col] as unknown[])[i]))).join(',')
+      );
+      csv = [header, ...rows].join('\n');
+    }
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
     a.download = `${scanId != null ? `scan${scanId}_` : ''}${runId.slice(0, 8)}_${activeStream}.csv`;
@@ -245,38 +259,57 @@ export default function RunDataTab({ serverUrl, catalog, runId }: Props) {
         {!loading && !error && columns.length > 0 && (
           <>
             <div className="flex items-center justify-between px-3 py-1.5 bg-white border-b border-gray-100 sticky top-0 z-20">
-              <span className="text-xs text-gray-400">{nRows} rows · {columns.length} columns</span>
+              <span className="text-xs text-gray-400">
+                {isTransposed ? `${columns.length} fields` : `${nRows} rows · ${columns.length} columns`}
+              </span>
               <button
                 onClick={handleExportCsv}
                 className="text-xs bg-sky-600 hover:bg-sky-500 text-white px-3 py-1 rounded font-medium transition-colors"
               >Export CSV</button>
             </div>
-            <table className="w-full border-collapse">
-              <thead>
-                <tr>
-                  <th className={thCls}>#</th>
-                  {columns.map(col => (
-                    <th key={col} className={thCls}>{col}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rowOrder.map((ri, i) => (
-                  <tr key={ri} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                    <td className={`${tdCls} text-gray-400`}>{i + 1}</td>
-                    {columns.map(col => {
-                      const v = (data[col] as unknown[])[ri];
-                      const display = col === 'time' && typeof v === 'number'
-                        ? new Date(v * 1000).toLocaleString(undefined, { timeZoneName: 'short' })
-                        : typeof v === 'number'
-                          ? (Number.isInteger(v) ? String(v) : v.toPrecision(6))
-                          : String(v ?? '');
-                      return <td key={col} className={tdCls}>{display}</td>;
-                    })}
+            {isTransposed ? (
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr>
+                    <th className={thCls}>Field</th>
+                    {rowOrder.map((_, i) => (
+                      <th key={i} className={thCls}>{i === 0 ? 'Start' : 'Stop'}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {columns.map((col, i) => (
+                    <tr key={col} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                      <td className={`${tdCls} text-gray-500`}>{col}</td>
+                      {rowOrder.map(ri => (
+                        <td key={ri} className={tdCls}>{formatCell(col, (data[col] as unknown[])[ri])}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr>
+                    <th className={thCls}>#</th>
+                    {columns.map(col => (
+                      <th key={col} className={thCls}>{col}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rowOrder.map((ri, i) => (
+                    <tr key={ri} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                      <td className={`${tdCls} text-gray-400`}>{i + 1}</td>
+                      {columns.map(col => (
+                        <td key={col} className={tdCls}>{formatCell(col, (data[col] as unknown[])[ri])}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </>
         )}
       </div>
