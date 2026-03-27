@@ -1,16 +1,86 @@
-# Deployment Guide
+# Deployment
 
-## Overview
+## Architecture
 
-Kestrel is a static web app. The build step (requires Node.js) produces a `dist/` folder of plain HTML/JS/CSS files. These files can be served from APSshare so all beamlines share a single deployment — updating the files on APSshare instantly rolls out to all beamlines.
+```
+Browser 
+           │  http://nefarian.xray.aps.anl.gov:4173
+           ▼
+     ┌─────────────────────────────────────────┐
+     │  Podman container (kestrel:0.1.0)       │
+     │  managed by systemd user service        │
+     │                                         │
+     │  server.mjs (Express, port 4173)        │
+     │  ├── serves dist/   (the React app)     │
+     │  ├── /tiled-proxy/  → Tiled server      │
+     │  ├── /qs-proxy/     → QServer HTTP      │
+     │  └── /qs-stream/    → QServer SSE       │
+     └─────────────────────────────────────────┘
+```
+
+**Why a Node server and not just static files?**
+The React app needs to talk to Tiled and QServer, which run on different machines.
+Browsers block cross-origin requests (CORS), so `server.mjs` acts as a proxy:
+the browser only ever talks to one server, and that server forwards requests to
+Tiled or QServer on the browser's behalf.
+
+**Container image — two-stage build (`Containerfile`)**
+
+| Stage | Base image | What it does |
+|-------|-----------|--------------|
+| Build | `ubi9/nodejs-20` | Installs deps, runs `npm run build`, prunes dev deps |
+| Runtime | `ubi9/nodejs-20-minimal` | Copies only `dist/`, `server.mjs`, `node_modules`; runs as non-root (UID 1001) on port 4173 |
 
 ---
 
-## One-time Setup
+## Current setup
 
-### 1. Build environment (development machine only)
+The container runs on **nefarian** and is accessible at:
 
-Node.js is required only for building, not for serving. Use conda:
+```
+http://nefarian.xray.aps.anl.gov:4173
+```
+
+It is managed as a systemd user service (`container-kestrel.service`) that starts
+automatically on boot and restarts on failure.
+
+### Useful commands
+
+```bash
+# Check status
+systemctl --user status container-kestrel.service
+
+# Start / stop / restart
+systemctl --user start   container-kestrel.service
+systemctl --user stop    container-kestrel.service
+systemctl --user restart container-kestrel.service
+
+# Enable / disable auto-start on reboot
+systemctl --user enable  container-kestrel.service
+systemctl --user disable container-kestrel.service
+
+# View logs
+journalctl --user -u container-kestrel.service -n 100 --no-pager
+```
+
+---
+
+## Deploying an update
+
+```bash
+conda activate kestrel
+cd ~/workspace/webviz
+git pull
+npm run build
+podman build -t kestrel:0.1.0 .
+systemctl --user restart container-kestrel.service
+```
+
+---
+
+## One-time setup (nefarian or any new host)
+
+### 1. Build environment
 
 ```bash
 conda create -n kestrel nodejs
@@ -18,60 +88,132 @@ conda activate kestrel
 npm install
 ```
 
-### 2. Place the launcher script on APSshare
+### 2. Rootless Podman prerequisites
 
-Save the following as `/APSshare/bin/kestrel` and make it executable (`chmod +x /APSshare/bin/kestrel`):
+Rootless Podman requires subordinate UID/GID ranges. Check they exist:
 
 ```bash
-#!/bin/bash
-DIST="/APSshare/kestrel/dist"
-PIDFILE="/tmp/kestrel-$USER.pid"
-
-# Kill previous instance if running
-if [ -f "$PIDFILE" ]; then
-    kill "$(cat "$PIDFILE")" 2>/dev/null
-    rm "$PIDFILE"
-fi
-
-# Find a free port
-PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('',0)); print(s.getsockname()[1]); s.close()")
-
-# Start server and record PID
-python3 -m http.server "$PORT" --directory "$DIST" &>/dev/null &
-echo $! > "$PIDFILE"
-
-sleep 0.5
-xdg-open "http://localhost:$PORT"
+grep "^$USER:" /etc/subuid
+grep "^$USER:" /etc/subgid
 ```
 
----
+If missing, ask an admin to add them:
 
-## Deploying an Update
+```bash
+sudo usermod --add-subuids 100000-165535 <username>
+sudo usermod --add-subgids 100000-165535 <username>
+```
 
-On your development machine:
+Then log out, log back in, and run:
+
+```bash
+podman system migrate
+```
+
+### 3. Move Podman storage off NFS
+
+Podman's storage must be on a local filesystem — NFS will cause build failures.
+Create `~/.config/containers/storage.conf`:
+
+```toml
+[storage]
+driver = "overlay"
+graphroot = "/local/<username>/.local/share/containers/storage"
+runroot = "/run/user/<UID>/containers"
+```
+
+> Use your real numeric UID (from `id -u`) in `runroot`. Do not use shell
+> expansion like `$(id -u)` — this file does not support it.
+
+### 4. Build and run the container
 
 ```bash
 conda activate kestrel
+cd ~/workspace/webviz
 npm run build
-cp -r dist/ /APSshare/kestrel/dist/
+podman build -t kestrel:0.1.0 .
+podman run -d --name kestrel -p 4173:4173 --restart unless-stopped kestrel:0.1.0
 ```
 
-That's it — all beamlines get the update the next time they run `kestrel`.
-
----
-
-## Beamline User Instructions
-
-Run from any terminal:
+Verify it is running:
 
 ```bash
-kestrel
+podman ps --filter name=kestrel
+curl -I http://127.0.0.1:4173
 ```
 
-This opens a browser with the app. No conda activation or directory navigation required. On first use, enter your Tiled server address — it will be remembered for future sessions.
+### 5. Create the systemd user service
+
+```bash
+mkdir -p ~/.config/systemd/user
+podman generate systemd --name kestrel --files --new
+mv container-kestrel.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now container-kestrel.service
+
+# Allow the service to run at boot even when not logged in
+loginctl enable-linger "$USER"
+```
 
 ---
 
-## Per-beamline Configuration
+## When IT takes over
 
-Some beamlines may not use QServer. This can be disabled in the app via the gear icon (top right) → uncheck **Enable QServer panel**. The setting is saved in the browser and persists across sessions.
+### Push the image to the GitLab registry
+
+```bash
+podman login git.aps.anl.gov:8443   # username & password
+podman tag kestrel:0.1.0 git.aps.anl.gov:8443/bcda/kestrel:0.1.0
+podman tag kestrel:0.1.0 git.aps.anl.gov:8443/bcda/kestrel:latest
+podman push git.aps.anl.gov:8443/bcda/kestrel:0.1.0
+podman push git.aps.anl.gov:8443/bcda/kestrel:latest
+```
+
+Then tell IT to pull the image and restart the container on their server.
+
+### Stop the nefarian instance
+
+Once IT's server is live, stop and disable the container on nefarian:
+
+```bash
+systemctl --user stop    container-kestrel.service
+systemctl --user disable container-kestrel.service
+loginctl disable-linger "$USER"
+rm ~/.config/systemd/user/container-kestrel.service
+systemctl --user daemon-reload
+```
+
+---
+
+## Syncing the GitLab mirror
+
+The GitLab project mirrors the GitHub source. Sync manually after pushing to GitHub:
+
+```bash
+cd ~/workspace/kestrel.git
+git fetch origin
+git push --mirror gitlab
+```
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `no subuid ranges found` | Missing `/etc/subuid` or `/etc/subgid` entries | Add entries, then `podman system migrate` |
+| `Network file system detected as backing store` | Podman `graphroot` is on NFS | Move `graphroot` to a local path in `storage.conf` |
+| `EACCES: permission denied … package-lock.json` | Files copied as root in build stage | Ensure `COPY --chown=1001:0` in `Containerfile` |
+| `database/runroot mismatch` | Stale Podman state after storage reconfiguration | `rm -rf /local/<username>/.local/share/containers/storage && podman info` |
+
+---
+
+## Reference
+
+| Item | Value |
+|------|-------|
+| Running instance | `http://nefarian.xray.aps.anl.gov:4173` |
+| GitLab registry | `git.aps.anl.gov:8443/bcda/kestrel` |
+| Source code (GitHub) | `https://github.com/BCDA-APS/kestrel` |
+| Working directory | `~/workspace/webviz` |
+| GitLab mirror clone | `~/workspace/kestrel.git` |
