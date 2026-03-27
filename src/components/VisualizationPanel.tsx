@@ -23,6 +23,8 @@ type VisualizationPanelProps = {
   cursor2Y?: number | null;
   onPlotClick?: (dataX: number, dataY: number, cursorIdx: 0 | 1) => void;
   showCrosshair?: boolean;
+  showWaterfall?: boolean;
+  waterfallOffset?: number;
 };
 
 function PanelShell({ title, onRemove, id, badge, children, footer }: {
@@ -96,7 +98,7 @@ function TraceChip({ t, i: _i, style, color, onRemove }: {
   );
 }
 
-function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTracesUpdate, extraTraces, onRemoveExtraTrace, xLog, yLog, fitResults, traceStyles, cursor1, cursor2, cursor1Y, cursor2Y, onPlotClick, showCrosshair }: VisualizationPanelProps & { panel: Extract<Panel, { type: 'xy' }> }) {
+function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTracesUpdate, extraTraces, onRemoveExtraTrace, xLog, yLog, fitResults, traceStyles, cursor1, cursor2, cursor1Y, cursor2Y, onPlotClick, showCrosshair, showWaterfall, waterfallOffset }: VisualizationPanelProps & { panel: Extract<Panel, { type: 'xy' }> }) {
   const [liveTraces, setLiveTraces] = useState<XYTrace[] | null>(null);
   const tracesRef = useRef(panel.traces);
   tracesRef.current = panel.traces;
@@ -200,7 +202,10 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
     ? panel.traces.filter(t => !liveKeys.has(`${t.runId}|${t.xLabel}|${t.yLabel}`))
     : [];
   const baseTraces = liveTraces ? [...liveTraces, ...staticTraces] : panel.traces;
-  const displayTraces = [...baseTraces, ...(extraTraces ?? [])];
+  const rawDisplayTraces = [...baseTraces, ...(extraTraces ?? [])];
+  const displayTraces = (showWaterfall && waterfallOffset)
+    ? rawDisplayTraces.map((t, i) => ({ ...t, y: t.y.map(v => v + i * waterfallOffset) }))
+    : rawDisplayTraces;
   const xAxisTitle = displayTraces[0]?.xLabel ?? '';
   const yAxisTitle = displayTraces.length === 1 ? displayTraces[0].yLabel : 'Value';
 
@@ -429,9 +434,9 @@ function DatasetPanelContent({ panel, onRemove }: VisualizationPanelProps & { pa
   );
 }
 
-export default function VisualizationPanel({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTracesUpdate, extraTraces, onRemoveExtraTrace, xLog, yLog, fitResults, traceStyles, cursor1, cursor2, cursor1Y, cursor2Y, onPlotClick, showCrosshair }: VisualizationPanelProps) {
+export default function VisualizationPanel({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTracesUpdate, extraTraces, onRemoveExtraTrace, xLog, yLog, fitResults, traceStyles, cursor1, cursor2, cursor1Y, cursor2Y, onPlotClick, showCrosshair, showWaterfall, waterfallOffset }: VisualizationPanelProps) {
   if (panel.type === 'xy') {
-    return <XYPanelContent panel={panel} onRemove={onRemove} onRemoveTrace={onRemoveTrace} onStopLive={onStopLive} onLiveTracesUpdate={onLiveTracesUpdate} extraTraces={extraTraces} onRemoveExtraTrace={onRemoveExtraTrace} xLog={xLog} yLog={yLog} fitResults={fitResults} traceStyles={traceStyles} cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y} onPlotClick={onPlotClick} showCrosshair={showCrosshair} />;
+    return <XYPanelContent panel={panel} onRemove={onRemove} onRemoveTrace={onRemoveTrace} onStopLive={onStopLive} onLiveTracesUpdate={onLiveTracesUpdate} extraTraces={extraTraces} onRemoveExtraTrace={onRemoveExtraTrace} xLog={xLog} yLog={yLog} fitResults={fitResults} traceStyles={traceStyles} cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y} onPlotClick={onPlotClick} showCrosshair={showCrosshair} showWaterfall={showWaterfall} waterfallOffset={waterfallOffset} />;
   }
   return <DatasetPanelContent panel={panel} onRemove={onRemove} />;
 }

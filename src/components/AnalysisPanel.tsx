@@ -43,6 +43,11 @@ type AnalysisPanelProps = {
   // Style (per active trace)
   traceStyles: TraceStyle[];
   onTraceStyleChange: (i: number, patch: Partial<TraceStyle>) => void;
+  // Waterfall
+  showWaterfall: boolean;
+  onShowWaterfallChange: (v: boolean) => void;
+  waterfallOffset: number;
+  onWaterfallOffsetChange: (n: number) => void;
 };
 
 function Section({ id: _id, label, icon, open, onToggle, children, position }: {
@@ -210,6 +215,7 @@ export default function AnalysisPanel({
   onSnapToDataChange, onFitBetweenCursorsChange,
   onClearCursor1, onClearCursor2, onClearAllCursors,
   traceStyles, onTraceStyleChange,
+  showWaterfall, onShowWaterfallChange, waterfallOffset, onWaterfallOffsetChange,
 }: AnalysisPanelProps) {
   const stats = computeStats(activeX, activeY);
   const [open, setOpen] = useState<Set<string>>(new Set([]));
@@ -552,6 +558,34 @@ export default function AnalysisPanel({
                 <span>Values ≤ 0 are not shown on log scale.</span>
               </p>
             )}
+          </div>
+        </Section>
+
+        <Section id="waterfall" label="Waterfall" icon="M3 17l4-4 4 4 4-4 4-4M3 11l4-4 4 4 4-4 4-4" position={position}
+          open={open.has('waterfall')} onToggle={() => toggle('waterfall')}>
+          <div className="flex flex-col gap-2">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={showWaterfall}
+                onChange={e => onShowWaterfallChange(e.target.checked)}
+                disabled={!hasXYPanel}
+                className="accent-sky-600 w-3.5 h-3.5 disabled:opacity-40"
+              />
+              <span className={`text-sm ${hasXYPanel ? 'text-gray-700' : 'text-gray-400'}`}>Enable waterfall</span>
+            </label>
+            {showWaterfall && (
+              <label className="flex items-center gap-2 select-none">
+                <span className="text-xs text-gray-500 shrink-0">Offset</span>
+                <input
+                  type="number"
+                  value={waterfallOffset}
+                  onChange={e => onWaterfallOffsetChange(Number(e.target.value))}
+                  className="w-24 text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-sky-400"
+                />
+              </label>
+            )}
+            {!hasXYPanel && <p className="text-xs text-gray-400 italic">Open a plot to enable waterfall.</p>}
           </div>
         </Section>
 
