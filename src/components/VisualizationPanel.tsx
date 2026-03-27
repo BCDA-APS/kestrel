@@ -16,6 +16,7 @@ type VisualizationPanelProps = {
   yLog?: boolean;
   fitResults?: FitResult | null;
   traceStyles?: TraceStyle[];
+  traceAxes?: ('y1' | 'y2')[];
   cursor1?: number | null;
   cursor2?: number | null;
   cursor1Y?: number | null;
@@ -71,12 +72,14 @@ function plotlyDash(lineDash: string): Dash {
   return lineDash as Dash;
 }
 
-function TraceChip({ t, i: _i, style, color, onRemove }: {
+function TraceChip({ t, i: _i, style, color, axis, onRemove }: {
   t: XYTrace; i: number; style: TraceStyle; color: string;
+  axis?: 'y1' | 'y2';
   onRemove?: () => void;
 }) {
   const hasMarker = style.markerSymbol !== 'none';
   const icon = hasMarker ? MARKER_ICONS[style.markerSymbol] : null;
+  const isDerivative = t.runId.startsWith('__deriv__');
   return (
     <span className="inline-flex items-center gap-1 text-xs bg-gray-100 rounded px-1.5 py-0.5 max-w-[220px]">
       {hasMarker ? (
@@ -86,7 +89,10 @@ function TraceChip({ t, i: _i, style, color, onRemove }: {
           <line x1="0" y1="2" x2="14" y2="2" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
         </svg>
       )}
-      <span className="truncate">{t.runId.startsWith('__deriv__') ? t.yLabel : `${t.runLabel} (${t.runId.slice(0, 7)}) - ${t.yLabel}`}</span>
+      <span className="truncate">{isDerivative ? t.yLabel : `${t.runLabel} (${t.runId.slice(0, 7)}) - ${t.yLabel}`}</span>
+      {(isDerivative || axis === 'y2') && (
+        <span className="shrink-0 text-[9px] font-bold text-sky-600 leading-none">R</span>
+      )}
       {onRemove && (
         <button
           onClick={onRemove}
@@ -98,7 +104,7 @@ function TraceChip({ t, i: _i, style, color, onRemove }: {
   );
 }
 
-function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTracesUpdate, extraTraces, onRemoveExtraTrace, xLog, yLog, fitResults, traceStyles, cursor1, cursor2, cursor1Y, cursor2Y, onPlotClick, showCrosshair, showWaterfall, waterfallOffset }: VisualizationPanelProps & { panel: Extract<Panel, { type: 'xy' }> }) {
+function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTracesUpdate, extraTraces, onRemoveExtraTrace, xLog, yLog, fitResults, traceStyles, traceAxes, cursor1, cursor2, cursor1Y, cursor2Y, onPlotClick, showCrosshair, showWaterfall, waterfallOffset }: VisualizationPanelProps & { panel: Extract<Panel, { type: 'xy' }> }) {
   const [liveTraces, setLiveTraces] = useState<XYTrace[] | null>(null);
   const tracesRef = useRef(panel.traces);
   tracesRef.current = panel.traces;
@@ -193,10 +199,18 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
     ? rawDisplayTraces.map((t, i) => ({ ...t, y: t.y.map(v => v + i * waterfallOffset) }))
     : rawDisplayTraces;
   const xAxisTitle = displayTraces[0]?.xLabel ?? '';
-  const nonDerivTraces = displayTraces.filter(t => !t.runId.startsWith('__deriv__'));
+  const leftTraces = displayTraces.filter((t, i) =>
+    !t.runId.startsWith('__deriv__') && (traceAxes?.[i] ?? 'y1') === 'y1'
+  );
+  const rightUserTraces = displayTraces.filter((t, i) =>
+    !t.runId.startsWith('__deriv__') && (traceAxes?.[i] ?? 'y1') === 'y2'
+  );
   const derivTraces = displayTraces.filter(t => t.runId.startsWith('__deriv__'));
-  const yAxisTitle = nonDerivTraces.length === 1 ? nonDerivTraces[0].yLabel : 'Value';
-  const hasDerivative = derivTraces.length > 0;
+  const yAxisTitle = leftTraces.length === 1 ? leftTraces[0].yLabel : 'Value';
+  const y2Title = rightUserTraces.length === 1 ? rightUserTraces[0].yLabel
+    : derivTraces.length > 0 ? 'd/dx'
+    : 'Value';
+  const hasRightAxis = derivTraces.length > 0 || rightUserTraces.length > 0;
 
   const extractPlotCoords = (e: React.MouseEvent<HTMLDivElement>): [number, number] | null => {
     const plotDiv = wrapperRef.current?.querySelector('.js-plotly-plot') as any;
@@ -248,6 +262,7 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
             return (
               <TraceChip
                 key={i} t={t} i={i} style={style} color={color}
+                axis={traceAxes?.[i] ?? 'y1'}
                 onRemove={
                   t.runId.startsWith('__deriv__') ? onRemoveExtraTrace
                   : !liveConfig ? () => onRemoveTrace?.(i)
@@ -279,13 +294,14 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
                 const style = getEffectiveStyle(traceStyles, ti);
                 const color = style.color || PLOTLY_COLORS[ti % PLOTLY_COLORS.length];
                 const isDerivative = t.runId.startsWith('__deriv__');
+                const onRightAxis = isDerivative || (traceAxes?.[ti] ?? 'y1') === 'y2';
                 return {
                   x: order.map(i => t.x[i]),
                   y: order.map(i => t.y[i]),
                   mode: traceMode(style),
                   type: 'scatter' as const,
                   name: isDerivative ? t.yLabel : `${t.runLabel} (${t.runId.slice(0, 7)}) - ${t.yLabel}`,
-                  yaxis: isDerivative ? 'y2' as const : 'y' as const,
+                  yaxis: onRightAxis ? 'y2' as const : 'y' as const,
                   showlegend: false,
                   line: {
                     width: style.lineDash !== 'none' ? style.lineWidth : 0,
@@ -339,9 +355,9 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
                 ...(yLog ? { type: 'log' as const } : {}),
                 ...(showCrosshair ? { showspikes: true, spikemode: 'across', spikethickness: 1, spikecolor: '#9ca3af', spikedash: 'solid' } : {}),
               },
-              ...(hasDerivative ? {
+              ...(hasRightAxis ? {
                 yaxis2: {
-                  title: { text: 'd/dx', font: { size: 12, color: '#7f7f7f' } },
+                  title: { text: y2Title, font: { size: 12, color: '#7f7f7f' } },
                   overlaying: 'y' as const,
                   side: 'right' as const,
                 },
@@ -359,6 +375,6 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
   );
 }
 
-export default function VisualizationPanel({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTracesUpdate, extraTraces, onRemoveExtraTrace, xLog, yLog, fitResults, traceStyles, cursor1, cursor2, cursor1Y, cursor2Y, onPlotClick, showCrosshair, showWaterfall, waterfallOffset }: VisualizationPanelProps) {
-  return <XYPanelContent panel={panel} onRemove={onRemove} onRemoveTrace={onRemoveTrace} onStopLive={onStopLive} onLiveTracesUpdate={onLiveTracesUpdate} extraTraces={extraTraces} onRemoveExtraTrace={onRemoveExtraTrace} xLog={xLog} yLog={yLog} fitResults={fitResults} traceStyles={traceStyles} cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y} onPlotClick={onPlotClick} showCrosshair={showCrosshair} showWaterfall={showWaterfall} waterfallOffset={waterfallOffset} />;
+export default function VisualizationPanel({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTracesUpdate, extraTraces, onRemoveExtraTrace, xLog, yLog, fitResults, traceStyles, traceAxes, cursor1, cursor2, cursor1Y, cursor2Y, onPlotClick, showCrosshair, showWaterfall, waterfallOffset }: VisualizationPanelProps) {
+  return <XYPanelContent panel={panel} onRemove={onRemove} onRemoveTrace={onRemoveTrace} onStopLive={onStopLive} onLiveTracesUpdate={onLiveTracesUpdate} extraTraces={extraTraces} onRemoveExtraTrace={onRemoveExtraTrace} xLog={xLog} yLog={yLog} fitResults={fitResults} traceStyles={traceStyles} traceAxes={traceAxes} cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y} onPlotClick={onPlotClick} showCrosshair={showCrosshair} showWaterfall={showWaterfall} waterfallOffset={waterfallOffset} />;
 }

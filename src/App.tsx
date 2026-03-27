@@ -234,6 +234,7 @@ export default function App() {
   const [qsConnectStatus, setQsConnectStatus] = useState<'idle' | 'connecting' | 'ok' | 'error'>('idle');
   const qsConnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [traceStyles, setTraceStyles] = useState<TraceStyle[]>([]);
+  const [traceAxes, setTraceAxes] = useState<('y1' | 'y2')[]>([]);
   const [cursor1, setCursor1] = useState<number | null>(null);
   const [cursor1Y, setCursor1Y] = useState<number | null>(null);
   const [cursor2, setCursor2] = useState<number | null>(null);
@@ -367,6 +368,7 @@ export default function App() {
       return next;
     });
   }, []);
+
 
   const handlePlotClick = useCallback((dataX: number, dataY: number, cursorIdx: 0 | 1) => {
     let x = dataX, y = dataY;
@@ -523,6 +525,7 @@ export default function App() {
     setFitResults(null);
     setShowDerivative(false);
     setShowWaterfall(false);
+    setTraceAxes([]);
   }, [selectedRunId]);
 
   const livePlot = useCallback((traces: XYTrace[], title: string, stream: string, dataSubNode: string, dataNodeFamily: 'array' | 'table') => {
@@ -558,6 +561,7 @@ export default function App() {
     setFitResults(null);
     setShowDerivative(false);
     setShowWaterfall(false);
+    setTraceAxes([]);
   }, [serverUrl, selectedCatalog, selectedRunId]);
 
   const stopLive = useCallback(() => {
@@ -588,6 +592,21 @@ export default function App() {
       return newTraces.length === 0 ? prev : { ...prev, traces: [...prev.traces, ...newTraces] };
     });
   }, []);
+
+  const addTracesRight = useCallback((traces: XYTrace[]) => {
+    const existing = panelRef.current;
+    if (!existing || existing.type !== 'xy') return;
+    const existingKeys = new Set(existing.traces.map(t => `${t.runId}|${t.xLabel}|${t.yLabel}`));
+    const newTraces = traces.filter(t => !existingKeys.has(`${t.runId}|${t.xLabel}|${t.yLabel}`));
+    if (newTraces.length === 0) return;
+    const startIdx = existing.traces.length;
+    addTraces(traces);
+    setTraceAxes(prev => {
+      const next = [...prev];
+      for (let i = 0; i < newTraces.length; i++) next[startIdx + i] = 'y2';
+      return next;
+    });
+  }, [addTraces]);
 
   const handleShiftClickRun = useCallback(async (runId: string, label: string, detectors: string[], hintsDetectors: string[], motors: string[]) => {
     const currentPanel = panelRef.current;
@@ -1200,6 +1219,7 @@ export default function App() {
                       runAcquiring={selectedRunAcquiring}
                       onPlot={plot}
                       onAddTraces={panel?.type === 'xy' ? addTraces : null}
+                      onAddTracesRight={panel?.type === 'xy' ? addTracesRight : null}
                       onLivePlot={livePlot}
                       onRemoveRunTraces={removeRunTraces}
                       onZSelect={isGridScan ? setGridZField : undefined}
@@ -1268,7 +1288,7 @@ export default function App() {
                   ) : showGridHeatmap && isGridScan ? (
                     <GridScanPanel serverUrl={serverUrl} catalog={selectedCatalog} runId={selectedRunId} shape={selectedRunShape as [number, number] | null} dimensions={selectedRunHintsDimensions!} zField={gridZField} onClose={() => setShowGridHeatmap(false)} onAnalyzeCut={(x, y, xLabel, yLabel, title) => { setShowGridHeatmap(false); setPanel({ id: crypto.randomUUID(), type: 'xy', traces: [{ x, y, xLabel, yLabel, runLabel: selectedRunLabel, runId: selectedRunId }], title }); setFitResults(null); setShowDerivative(false); }} />
                   ) : panel ? (
-                    <VisualizationPanel panel={panel} onRemove={() => { setPanel(null); setFitResults(null); if (isGridScan) setShowGridHeatmap(true); }} onRemoveTrace={handleRemoveTrace} onStopLive={stopLive} onLiveTracesUpdate={handleLiveTracesUpdate} extraTraces={derivativeTraces} onRemoveExtraTrace={() => setShowDerivative(false)} xLog={xLog} yLog={yLog} fitResults={fitResults} traceStyles={traceStyles} cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y} onPlotClick={handlePlotClick} showWaterfall={showWaterfall} waterfallOffset={waterfallOffset} />
+                    <VisualizationPanel panel={panel} onRemove={() => { setPanel(null); setFitResults(null); if (isGridScan) setShowGridHeatmap(true); }} onRemoveTrace={handleRemoveTrace} onStopLive={stopLive} onLiveTracesUpdate={handleLiveTracesUpdate} extraTraces={derivativeTraces} onRemoveExtraTrace={() => setShowDerivative(false)} xLog={xLog} yLog={yLog} fitResults={fitResults} traceStyles={traceStyles} traceAxes={traceAxes} cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y} onPlotClick={handlePlotClick} showWaterfall={showWaterfall} waterfallOffset={waterfallOffset} />
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-gray-400 select-none">
                       <svg className="h-16 w-16 mb-4 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1376,7 +1396,7 @@ export default function App() {
                   ) : showGridHeatmap && isGridScan ? (
                     <GridScanPanel serverUrl={serverUrl} catalog={selectedCatalog} runId={selectedRunId} shape={selectedRunShape as [number, number] | null} dimensions={selectedRunHintsDimensions!} zField={gridZField} onClose={() => setShowGridHeatmap(false)} onAnalyzeCut={(x, y, xLabel, yLabel, title) => { setShowGridHeatmap(false); setPanel({ id: crypto.randomUUID(), type: 'xy', traces: [{ x, y, xLabel, yLabel, runLabel: selectedRunLabel, runId: selectedRunId }], title }); setFitResults(null); setShowDerivative(false); }} />
                   ) : panel ? (
-                    <VisualizationPanel panel={panel} onRemove={() => { setPanel(null); setFitResults(null); if (isGridScan) setShowGridHeatmap(true); }} onRemoveTrace={handleRemoveTrace} onStopLive={stopLive} onLiveTracesUpdate={handleLiveTracesUpdate} extraTraces={derivativeTraces} onRemoveExtraTrace={() => setShowDerivative(false)} xLog={xLog} yLog={yLog} fitResults={fitResults} traceStyles={traceStyles} cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y} onPlotClick={handlePlotClick} showWaterfall={showWaterfall} waterfallOffset={waterfallOffset} />
+                    <VisualizationPanel panel={panel} onRemove={() => { setPanel(null); setFitResults(null); if (isGridScan) setShowGridHeatmap(true); }} onRemoveTrace={handleRemoveTrace} onStopLive={stopLive} onLiveTracesUpdate={handleLiveTracesUpdate} extraTraces={derivativeTraces} onRemoveExtraTrace={() => setShowDerivative(false)} xLog={xLog} yLog={yLog} fitResults={fitResults} traceStyles={traceStyles} traceAxes={traceAxes} cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y} onPlotClick={handlePlotClick} showWaterfall={showWaterfall} waterfallOffset={waterfallOffset} />
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-gray-400 select-none">
                       <svg className="h-16 w-16 mb-4 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">

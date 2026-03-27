@@ -20,6 +20,7 @@ type FieldSelectorProps = {
   runAcquiring: boolean;
   onPlot: (traces: XYTrace[], title: string) => void;
   onAddTraces: ((traces: XYTrace[]) => void) | null;
+  onAddTracesRight: ((traces: XYTrace[]) => void) | null;
   onLivePlot: ((traces: XYTrace[], title: string, stream: string, dataSubNode: string, dataNodeFamily: 'array' | 'table') => void) | null;
   onRemoveRunTraces?: (runId: string) => void;
   /** When provided, switches to single-select Z mode for heatmap field selection */
@@ -39,7 +40,7 @@ const catSeg = (c: string | null) => c ? `/${c}` : '';
 const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(function FieldSelector({
   serverUrl, catalog, runId, runLabel,
   runDetectors, runHintsDetectors = [], detectorDefault = 'smart', runMotors, runAcquiring,
-  onPlot, onAddTraces, onLivePlot, onRemoveRunTraces, onZSelect, onGridPlot, onGrid1DPlot, onImageOpen,
+  onPlot, onAddTraces, onAddTracesRight, onLivePlot, onRemoveRunTraces, onZSelect, onGridPlot, onGrid1DPlot, onImageOpen,
 }, ref) {
   const zMode = !!onZSelect;
   // A field is a 2D image if it has ≥2 shape dimensions with the last two both > 1
@@ -600,6 +601,20 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     }
   };
 
+  const handleAddTracesRight = async () => {
+    if (!xField || yFields.length === 0 || adding || !onAddTracesRight) return;
+    setAdding(true);
+    setError('');
+    try {
+      const traces = await fetchAllTraces(xField, yFields);
+      onAddTracesRight(traces);
+    } catch {
+      setError('Failed to fetch data');
+    } finally {
+      setAdding(false);
+    }
+  };
+
   const thClass = 'px-2 py-1 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-200 bg-gray-50';
   const tdClass = 'px-2 py-1 text-xs text-gray-700';
 
@@ -657,8 +672,14 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
                     onClick={handleAddTraces}
                     disabled={!xField || yFields.length === 0 || adding || !onAddTraces}
                     className="px-2 py-0.5 text-xs bg-white border border-sky-600 text-sky-600 rounded hover:bg-sky-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
-                    title={onAddTraces ? 'Add curve(s) to current plot' : 'No plot open — use Plot first'}
-                  >+</button>
+                    title={onAddTraces ? 'Add curve(s) to left axis' : 'No plot open — use Plot first'}
+                  >+L</button>
+                  <button
+                    onClick={handleAddTracesRight}
+                    disabled={!xField || yFields.length === 0 || adding || !onAddTracesRight}
+                    className="px-2 py-0.5 text-xs bg-white border border-sky-600 text-sky-600 rounded hover:bg-sky-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
+                    title={onAddTracesRight ? 'Add curve(s) to right axis' : 'No plot open — use Plot first'}
+                  >+R</button>
                 </>
               )}
             </div>
