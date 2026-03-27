@@ -56,6 +56,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   const lastXRef = useRef('');
   const lastXWasMotorRef = useRef(false);
   const lastYRef = useRef<string[]>([]);
+  const lastManualStreamRef = useRef('');
   // Tracks which runId the current `fields` were loaded for; prevents stale-fields auto-select
   const fieldsRunIdRef = useRef('');
   // True after we removed traces via onRemoveRunTraces, so the next Y check re-creates the panel
@@ -121,7 +122,14 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
         const names: string[] = (json.data ?? []).map((item: any) => item.id);
         const nonBaseline = names.filter(n => n !== 'baseline');
         setStreams(nonBaseline);
-        setSelectedStream(nonBaseline.includes('primary') ? 'primary' : (nonBaseline[0] ?? ''));
+        const preferred = lastManualStreamRef.current;
+        const streamRestored = !!preferred && nonBaseline.includes(preferred);
+        if (preferred && !streamRestored) {
+          // Had a stream preference but it's not available — clear field memory so auto-pick runs fresh
+          lastXRef.current = '';
+          lastYRef.current = [];
+        }
+        setSelectedStream(streamRestored ? preferred : nonBaseline.includes('primary') ? 'primary' : (nonBaseline[0] ?? ''));
       })
       .catch(() => {});
   }, [serverUrl, catalog, runId]);
@@ -463,16 +471,22 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId]);
 
-  // When waiting for live and primary stream hasn't appeared yet, poll for it
+  // When waiting for live and the target stream hasn't appeared yet, poll for it
   useEffect(() => {
-    if (pendingAction !== 'live' || selectedStream === 'primary') return;
+    const targetStream = lastManualStreamRef.current || 'primary';
+    if (pendingAction !== 'live' || selectedStream === targetStream) return;
     const poll = () =>
       fetch(`${serverUrl}/api/v1/search${catSeg(catalog)}/${runId}?page[limit]=50`)
         .then(r => r.json())
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .then(json => {
           const names: string[] = (json.data ?? []).map((item: any) => item.id);
-          if (names.includes('primary')) { setStreams(names); setSelectedStream('primary'); }
+          if (names.includes(targetStream)) { setStreams(names); setSelectedStream(targetStream); }
+          else if (names.includes('primary')) {
+            // Target stream not available on this run — fall back to primary and clear preference
+            lastManualStreamRef.current = '';
+            setStreams(names); setSelectedStream('primary');
+          }
         })
         .catch(() => {});
     const id = setInterval(poll, 2000);
@@ -480,9 +494,9 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingAction, selectedStream, serverUrl, catalog, runId]);
 
-  // Retry fetchFields every 2s while on primary but waiting for data to appear
+  // Retry fetchFields every 2s while waiting for data to appear on the target stream
   useEffect(() => {
-    if (pendingAction !== 'live' || loading || fields.length > 0 || selectedStream !== 'primary') return;
+    if (pendingAction !== 'live' || loading || fields.length > 0 || selectedStream !== (lastManualStreamRef.current || 'primary')) return;
     const id = setInterval(fetchFields, 2000);
     return () => clearInterval(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -491,7 +505,6 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   // Fire plot/live once fields are ready; guard live against non-primary stream
   useEffect(() => {
     if (pendingAction && !loading && xField && yFields.length > 0) {
-      if (pendingAction === 'live' && selectedStream !== 'primary') return;
       const action = pendingAction;
       setPendingAction(null);
       if (action === 'live') handleLivePlot();
@@ -601,7 +614,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
         <div className="flex items-center gap-2">
           <select
             value={selectedStream}
-            onChange={e => setSelectedStream(e.target.value)}
+            onChange={e => { lastManualStreamRef.current = e.target.value; setSelectedStream(e.target.value); }}
             className="text-xs bg-white border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-sky-400"
           >
             {streams.map(s => <option key={s} value={s}>{s}</option>)}
