@@ -631,6 +631,29 @@ export default function App() {
     }
   }, [serverUrl, selectedCatalog, addTraces, plot]);
 
+  const handleAltClickRun = useCallback(async (runId: string, label: string, detectors: string[], hintsDetectors: string[], motors: string[]) => {
+    const currentPanel = panelRef.current;
+    const hasGraph = currentPanel?.type === 'xy' && currentPanel.traces.length > 0;
+    const preferX = hasGraph ? currentPanel!.traces[0].xLabel : '';
+    const preferYs = hasGraph ? [...new Set(currentPanel!.traces.map(t => t.yLabel))] : [];
+    setAddRunId(runId);
+    setAddRunError(null);
+    try {
+      const traces = await fetchRunTraces(serverUrl, selectedCatalog ?? '', runId, label, detectors, hintsDetectors, motors, preferX, preferYs);
+      if (hasGraph) {
+        addTracesRight(traces);
+      } else {
+        plot(traces, label || runId.slice(0, 7));
+      }
+      setCenterTab('graph');
+    } catch (e) {
+      setAddRunError(`Could not add run ${label || runId.slice(0, 7)}: ${e instanceof Error ? e.message : 'unknown error'}`);
+      setTimeout(() => setAddRunError(null), 6000);
+    } finally {
+      setAddRunId(null);
+    }
+  }, [serverUrl, selectedCatalog, addTracesRight, plot]);
+
   const removeTrace = useCallback((index: number) => {
     setPanel((prev) => {
       if (!prev || prev.type !== 'xy') return prev;
@@ -1184,6 +1207,7 @@ export default function App() {
                     }
                   }}
                   onShiftClickRun={handleShiftClickRun}
+                  onAltClickRun={panel?.type === 'xy' ? handleAltClickRun : undefined}
                   loadingRunId={addRunId}
                   addRunError={addRunError}
                   onAutoFollowChange={setAutoFollow}

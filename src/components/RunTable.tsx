@@ -28,6 +28,7 @@ type RunTableProps = {
   onSelectRun: (runId: string, label: string, detectors: string[], hintsDetectors: string[], motors: string[], acquiring: boolean) => void;
   onDoubleClickRun?: (runId: string, label: string, detectors: string[], hintsDetectors: string[], motors: string[], acquiring: boolean) => void;
   onShiftClickRun?: (runId: string, label: string, detectors: string[], hintsDetectors: string[], motors: string[], acquiring: boolean) => void;
+  onAltClickRun?: (runId: string, label: string, detectors: string[], hintsDetectors: string[], motors: string[], acquiring: boolean) => void;
   loadingRunId?: string | null;
   addRunError?: string | null;
   onAutoFollowChange?: (v: boolean) => void;
@@ -195,7 +196,7 @@ function DualRangeSlider({ minMs, maxMs, fromMs, toMs, onFromChange, onToChange 
   );
 }
 
-export default function RunTable({ serverUrl, catalog, page, selectedRunId, autoFollow, autoAdd, onAutoAddChange, onPageChange, onSelectRun, onDoubleClickRun, onShiftClickRun, loadingRunId, addRunError, onAutoFollowChange, onNewAcquiringRun }: RunTableProps) {
+export default function RunTable({ serverUrl, catalog, page, selectedRunId, autoFollow, autoAdd, onAutoAddChange, onPageChange, onSelectRun, onDoubleClickRun, onShiftClickRun, onAltClickRun, loadingRunId, addRunError, onAutoFollowChange, onNewAcquiringRun }: RunTableProps) {
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -554,10 +555,10 @@ export default function RunTable({ serverUrl, catalog, page, selectedRunId, auto
                       e.preventDefault();
                       if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null; }
                       onShiftClickRun(run.id, label, run.detectorList, run.hintsDetectorList, run.motorList, run.acquiring);
-                    } else if (e.altKey) {
+                    } else if (e.altKey && onAltClickRun) {
                       e.preventDefault();
                       if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null; }
-                      onDoubleClickRun?.(run.id, label, run.detectorList, run.hintsDetectorList, run.motorList, run.acquiring);
+                      onAltClickRun(run.id, label, run.detectorList, run.hintsDetectorList, run.motorList, run.acquiring);
                     } else if (e.detail === 1) {
                       if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
                       clickTimerRef.current = setTimeout(() => {
