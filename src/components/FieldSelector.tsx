@@ -95,6 +95,10 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
       return;
     }
     autoSelectImagePending.current = false;
+    // If hints point to a non-image scalar, don't pre-select the image field
+    const hintsDets = runHintsDetectors.length > 0 ? runHintsDetectors : runDetectors;
+    const hintsHasScalar = fields.some(f => !isImageField(f) && matchesDev(f.name, hintsDets));
+    if (hintsHasScalar) return;
     const remembered = lastImageFieldRef.current;
     const match = remembered ? imageFields.find(f => f.name === remembered) : null;
     const chosen = match ? match : imageFields[0];
@@ -354,8 +358,10 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     } else if (detectorDefault === 'hints' || (detectorDefault === 'smart' && validLastY.length === 0)) {
       // Prefer hints detectors; fall back to full detector list
       const hintsDets = runHintsDetectors.length > 0 ? runHintsDetectors : runDetectors;
-      const firstDet = hasImageFields ? undefined :
-        sortedFields.find(f => !isImageField(f) && isNumeric(f) && matchesDev(f.name, hintsDets) && !matchesDev(f.name, runMotors)) ??
+      const hintsNonImageDet = sortedFields.find(f => !isImageField(f) && isNumeric(f) && matchesDev(f.name, hintsDets) && !matchesDev(f.name, runMotors));
+      // Only suppress Y auto-select when image fields exist AND hints don't point to a non-image scalar
+      const firstDet = (hasImageFields && !hintsNonImageDet) ? undefined :
+        hintsNonImageDet ??
         sortedFields.find(f => !isImageField(f) && isNumeric(f) && matchesDev(f.name, runDetectors) && !matchesDev(f.name, runMotors)) ??
         sortedFields.find(f => matchesDev(f.name, runDetectors));
       setYFields(firstDet ? [firstDet.name] : []);
@@ -526,6 +532,10 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     },
     scheduleImageOpen: () => {
       if (!onImageOpen) { setPendingAction('plot'); return; }
+      // If hints point to a non-image scalar, plot that instead of opening the image
+      const hintsDets = runHintsDetectors.length > 0 ? runHintsDetectors : runDetectors;
+      const hintsHasScalar = fields.some(f => !isImageField(f) && matchesDev(f.name, hintsDets));
+      if (hintsHasScalar) { setPendingAction('plot'); return; }
       // If image field already selected and stream is ready, open immediately
       const f = fields.find(fi => fi.name === imageYField);
       if (imageYField && f && selectedStream) {
@@ -537,7 +547,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
         autoSelectImagePending.current = true;
       }
     },
-  }), [onImageOpen, imageYField, fields, selectedStream, dataSubNode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }), [onImageOpen, imageYField, fields, selectedStream, dataSubNode, runHintsDetectors, runDetectors]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch table row count for shape display — polls every 2s while acquiring, once when completed
   useEffect(() => {
