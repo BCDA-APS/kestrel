@@ -1,5 +1,7 @@
 # Deployment
 
+> **Summary:** The web app runs inside a container on a workstation called **nefarian**, which anyone on the network can reach at `http://nefarian.xray.aps.anl.gov:4173`. The container bundles the React frontend and a small Node server that acts as a middleman — it forwards browser requests to Tiled and QServer so the browser doesn't have to talk to those directly. The container is managed as a system service that starts automatically on boot and restarts if it crashes. To deploy an update: pull the latest code, rebuild the app and container, then restart the service.
+
 ## Architecture
 
 ```
@@ -75,8 +77,17 @@ npm run build
 podman build -t kestrel:0.1.0 .
 systemctl --user restart container-kestrel.service
 ```
+Here's exactly what each step does and why it results in network-wide access:
 
----
+- `npm run build`: compiles the React app into static files in `dist/`
+
+- `podman build -t kestrel:0.1.0 .`: packages everything into a container: the `dist/` folder + `server.mjs` (a custom Express server). The container exposes port `4173``.
+
+- `systemctl --user restart container-kestrel.service`: Podman can generate systemd unit files for containers. This is what gives auto-restart and persistence across reboots.
+
+- Why it's accessible from the network: `server.mjs` calls `http.createServer(app).listen(PORT)` without specifying a hostname, which means it binds to `0.0.0.0` (all network interfaces). So any machine that can reach nefarian on port 4173 can access it.
+
+> **Note:** This network-wide binding only applies to the production container. `npm run dev` (Vite's dev server) defaults to `localhost` and is only accessible from the same machine. To expose the dev server on the network you would need to add `server: { host: '0.0.0.0' }` to `vite.config.ts`.
 
 ## One-time setup (nefarian or any new host)
 

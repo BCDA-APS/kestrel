@@ -10,10 +10,14 @@ A browser-based visualization tool for [Tiled](https://blueskyproject.io/tiled/)
 
 ### 1. Create a conda environment with Node.js
 
+If you don't already have Node.js, the easiest way to get it is via conda:
+
 ```bash
 conda create -n kestrel nodejs
 conda activate kestrel
 ```
+
+Otherwise, install Node.js directly from [nodejs.org](https://nodejs.org/) or via your system package manager.
 
 ### 2. Clone and install dependencies
 
