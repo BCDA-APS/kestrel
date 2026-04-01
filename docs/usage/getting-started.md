@@ -13,8 +13,9 @@ The run table shows all runs in the selected catalog. Use the filter controls ab
 | Interaction | Action |
 |-------------|--------|
 | Click | Select the run and load its fields into the field selector |
-| Double-click or Alt+click | Open a plot (or image viewer) immediately using auto-selected fields |
-| Ctrl/Cmd+click | Add the run's traces to the current plot without replacing it |
+| Double-click | Open a plot (or image viewer) immediately using auto-selected fields |
+| Ctrl/Cmd+click | Add the run's traces to the current plot on the left Y-axis |
+| Alt+click | Add the run's traces to the current plot on the right Y-axis |
 
 ### Auto-follow
 
