@@ -8,7 +8,7 @@ The analysis panel sits to the right of the plot and is always active for 1D plo
 |---------|-------------|
 | **Log X** | Toggle logarithmic X axis |
 | **Log Y** | Toggle logarithmic Y axis |
-| **Derivative** | Plot dY/dX instead of Y; use **Smooth** to pre-smooth before differentiating (1–99 points), and **Normalize** to scale the derivative to the same range as the source |
+| **Derivative** | Plot dY/dX instead of Y; use **Smooth** to pre-smooth before differentiating (1–99 points). The derivative is always plotted on the right Y-axis. |
 
 ## Trace style
 
