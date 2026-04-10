@@ -14,11 +14,14 @@ export interface ZMatrixResult {
  * precision before uniqueness comparison to avoid spurious duplicates.
  *
  * When `shape` is provided (from start.shape in Bluesky metadata), range-based
- * binning is used for both motors. The fast-motor (column) bounds use a robust
- * estimator — the kRows-th smallest and kRows-th largest m2 values — to tolerate
- * fly-scan turnaround triggers that land slightly outside the intended setpoint range
- * and would otherwise compress the binning, causing adjacent setpoints to collide
- * and leaving cells at zero counts (NaN).
+ * binning is used for both motors. For the fast motor, if a `_user_setpoint` or
+ * `_setpoint` column exists in `data`, setpoint values are used for binning rather
+ * than noisy encoder readings. In boustrophedon fly-scans the encoder lags the
+ * setpoint by up to ~half a column width on rows immediately following a turnaround,
+ * which is enough to shift data into the wrong column bin. Setpoints are exact so
+ * binning against them eliminates this systematic error. When no setpoint column is
+ * available, a robust range estimator (kRows-th percentile) is used to tolerate any
+ * fly-scan turnaround triggers that land outside the intended setpoint range.
  */
 export function buildZMatrix(
   data: Record<string, number[]>,
@@ -73,18 +76,20 @@ export function buildZMatrix(
       }
     }
 
-    // Fast motor: use a robust range estimate for m2.
-    // Raw min/max fail when fly-scan turnaround triggers land slightly outside the intended
-    // setpoint range: one outlier expands m2Span, compressing all intended positions so
-    // adjacent setpoints round to the same ci, leaving the next cell at zero counts → NaN.
-    // Fix: sort m2 values and use the kRows-th smallest / kRows-th largest as bounds.
-    // Each intended extreme position appears kRows times (once per completed row); this
-    // tolerates up to kRows-1 outlier turnaround points without affecting the range.
-    const m2Sorted = [...m2Flat].sort((a, b) => a - b);
-    // For full scans, skip kRows-1 values from each end to discard fly-scan turnaround
-    // triggers (there are ~kRows-1 per side). For partial scans, there are very few
-    // turnaround triggers and their effect on the range is negligible, so raw min/max works.
-    const skip = n >= nR * nC ? Math.max(0, kRows - 1) : 0;
+    // Fast motor: prefer setpoint values for binning over noisy encoder readings.
+    // In boustrophedon fly-scans the encoder lags the setpoint by up to ~half a column
+    // width on rows that immediately follow a turnaround; that lag shifts data into the
+    // wrong bin. Setpoints are exact so binning against them is always correct.
+    const m2SpKey = (`${fastMotor}_user_setpoint` in data)
+      ? `${fastMotor}_user_setpoint`
+      : (`${fastMotor}_setpoint` in data ? `${fastMotor}_setpoint` : null);
+    const m2ForBin: number[] = (m2SpKey ? data[m2SpKey] : null) ?? m2Flat;
+
+    // When setpoints are available the range is exact and needs no outlier trimming.
+    // When falling back to encoder readings, use the kRows-th percentile to tolerate
+    // fly-scan turnaround triggers that land slightly outside the intended range.
+    const m2Sorted = [...m2ForBin].sort((a, b) => a - b);
+    const skip = (!m2SpKey && n >= nR * nC) ? Math.max(0, kRows - 1) : 0;
     const m2Min = m2Sorted[Math.min(skip, n - 1)];
     const m2Max = m2Sorted[Math.max(0, n - 1 - skip)];
     const m2Span = m2Max - m2Min || 1;
@@ -93,7 +98,7 @@ export function buildZMatrix(
     const counts: number[][] = Array.from({ length: nR }, () => new Array(nC).fill(0));
     for (let k = 0; k < n; k++) {
       const ri = nR === 1 ? 0 : Math.min(nR - 1, Math.round(((m1Flat[k] - m1Min) / m1Span) * (nR - 1)));
-      const ci = nC === 1 ? 0 : Math.min(nC - 1, Math.max(0, Math.round(((m2Flat[k] - m2Min) / m2Span) * (nC - 1))));
+      const ci = nC === 1 ? 0 : Math.min(nC - 1, Math.max(0, Math.round(((m2ForBin[k] - m2Min) / m2Span) * (nC - 1))));
       sums[ri][ci]   += zFlat[k];
       counts[ri][ci] += 1;
     }
