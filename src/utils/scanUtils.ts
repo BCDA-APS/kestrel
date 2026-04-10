@@ -14,9 +14,11 @@ export interface ZMatrixResult {
  * precision before uniqueness comparison to avoid spurious duplicates.
  *
  * When `shape` is provided (from start.shape in Bluesky metadata), range-based
- * binning is used instead of unique-value detection. This handles motor position
- * jitter where encoder readings differ slightly from setpoints, which would
- * otherwise produce a huge sparse matrix with mostly-NaN cells.
+ * binning is used for both motors. The fast-motor (column) bounds use a robust
+ * estimator — the kRows-th smallest and kRows-th largest m2 values — to tolerate
+ * fly-scan turnaround triggers that land slightly outside the intended setpoint range
+ * and would otherwise compress the binning, causing adjacent setpoints to collide
+ * and leaving cells at zero counts (NaN).
  */
 export function buildZMatrix(
   data: Record<string, number[]>,
@@ -38,22 +40,57 @@ export function buildZMatrix(
     const nR = shape[0];
     const nC = shape[1];
 
-    let m1Min = Infinity, m1Max = -Infinity, m2Min = Infinity, m2Max = -Infinity;
+    let m1Min = Infinity, m1Max = -Infinity;
     for (let k = 0; k < n; k++) {
       if (m1Flat[k] < m1Min) m1Min = m1Flat[k];
       if (m1Flat[k] > m1Max) m1Max = m1Flat[k];
-      if (m2Flat[k] < m2Min) m2Min = m2Flat[k];
-      if (m2Flat[k] > m2Max) m2Max = m2Flat[k];
     }
 
-    const m1Span = m1Max - m1Min || 1;
+    let m1Span = m1Max - m1Min || 1;
+
+    // Partial-scan correction: when n < nR*nC, [m1Min, m1Max] covers only the completed
+    // rows, not the full grid. Range-based binning then stretches those few rows across
+    // nR slots (e.g., rows 0,1,2 of a 21-row scan land at matrix rows 20, 10, 0 instead
+    // of 20, 19, 18). Fix: estimate the per-row step from the partial span, then
+    // extrapolate the full expected range. Scan direction (increasing vs. decreasing motor)
+    // is inferred from the first acquired data point.
+    const kRows = n < nR * nC ? Math.max(1, Math.round(n / nC)) : nR;
+    if (n < nR * nC && nR > 1) {
+      if (kRows >= 2) {
+        const fullSpan = (m1Max - m1Min) / (kRows - 1) * (nR - 1);
+        const isIncreasing = m1Flat[0] <= (m1Min + m1Max) / 2;
+        if (isIncreasing) {
+          // m1Min is the scan start; the far end of the range hasn't been reached yet.
+          m1Span = fullSpan;
+        } else {
+          // m1Max is the scan start; shift m1Min to the extrapolated full minimum.
+          m1Min = m1Max - fullSpan;
+          m1Span = fullSpan;
+        }
+      }
+    }
+
+    // Fast motor: use a robust range estimate for m2.
+    // Raw min/max fail when fly-scan turnaround triggers land slightly outside the intended
+    // setpoint range: one outlier expands m2Span, compressing all intended positions so
+    // adjacent setpoints round to the same ci, leaving the next cell at zero counts → NaN.
+    // Fix: sort m2 values and use the kRows-th smallest / kRows-th largest as bounds.
+    // Each intended extreme position appears kRows times (once per completed row); this
+    // tolerates up to kRows-1 outlier turnaround points without affecting the range.
+    const m2Sorted = [...m2Flat].sort((a, b) => a - b);
+    // For full scans, skip kRows-1 values from each end to discard fly-scan turnaround
+    // triggers (there are ~kRows-1 per side). For partial scans, there are very few
+    // turnaround triggers and their effect on the range is negligible, so raw min/max works.
+    const skip = n >= nR * nC ? Math.max(0, kRows - 1) : 0;
+    const m2Min = m2Sorted[Math.min(skip, n - 1)];
+    const m2Max = m2Sorted[Math.max(0, n - 1 - skip)];
     const m2Span = m2Max - m2Min || 1;
 
     const sums:   number[][] = Array.from({ length: nR }, () => new Array(nC).fill(0));
     const counts: number[][] = Array.from({ length: nR }, () => new Array(nC).fill(0));
     for (let k = 0; k < n; k++) {
       const ri = nR === 1 ? 0 : Math.min(nR - 1, Math.round(((m1Flat[k] - m1Min) / m1Span) * (nR - 1)));
-      const ci = nC === 1 ? 0 : Math.min(nC - 1, Math.round(((m2Flat[k] - m2Min) / m2Span) * (nC - 1)));
+      const ci = nC === 1 ? 0 : Math.min(nC - 1, Math.max(0, Math.round(((m2Flat[k] - m2Min) / m2Span) * (nC - 1))));
       sums[ri][ci]   += zFlat[k];
       counts[ri][ci] += 1;
     }

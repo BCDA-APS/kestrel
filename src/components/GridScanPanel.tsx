@@ -15,6 +15,7 @@ type Props = {
   shape: [number, number] | null;
   dimensions: string[][];
   zField?: string;
+  runAcquiring?: boolean;
   onClose?: () => void;
   onAnalyzeCut?: (x: number[], y: number[], xLabel: string, yLabel: string, title: string) => void;
 };
@@ -202,6 +203,7 @@ function drawHeatmap(
 
   const w = canvas.width;
   const h = canvas.height;
+  if (w === 0 || h === 0) return;
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
@@ -242,7 +244,7 @@ function drawHeatmap(
   }
 }
 
-export default function GridScanPanel({ serverUrl, catalog, runId, shape, dimensions, zField, onClose, onAnalyzeCut }: Props) {
+export default function GridScanPanel({ serverUrl, catalog, runId, shape, dimensions, zField, runAcquiring, onClose, onAnalyzeCut }: Props) {
   const slowMotor = dimensions[0]?.[0] ?? '';
   const fastMotor = dimensions[1]?.[0] ?? '';
 
@@ -265,21 +267,29 @@ export default function GridScanPanel({ serverUrl, catalog, runId, shape, dimens
   // always-current viewport for use in imperative event handlers
   const vpRef = useRef<Viewport>({ r0: 0, r1: 1, c0: 0, c1: 1 });
 
+  const loadData = useCallback(() => {
+    const cs = catSeg(catalog);
+    return fetchAllColumns(serverUrl, cs, runId)
+      .then(d => setAllData(d))
+      .catch(e => setError(String(e)));
+  }, [serverUrl, catalog, runId]);
+
   useEffect(() => {
     setAllData(null);
     setCrossRow(null);
     setCrossCol(null);
     setViewport(null);
-    if (!runId || !serverUrl) return;
-    let cancelled = false;
     setLoading(true);
     setError('');
-    const cs = catSeg(catalog);
-    fetchAllColumns(serverUrl, cs, runId)
-      .then(d => { if (!cancelled) { setAllData(d); setLoading(false); } })
-      .catch(e => { if (!cancelled) { setError(String(e)); setLoading(false); } });
-    return () => { cancelled = true; };
-  }, [runId, serverUrl, catalog]);
+    loadData().finally(() => setLoading(false));
+  }, [loadData]);
+
+  // Auto-refresh while acquiring
+  useEffect(() => {
+    if (!runAcquiring) return;
+    const id = setInterval(loadData, 2000);
+    return () => clearInterval(id);
+  }, [runAcquiring, loadData]);
 
   const effectiveZField = useMemo(() => {
     if (!allData) return '';
