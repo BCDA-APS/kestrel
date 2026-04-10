@@ -54,7 +54,10 @@ export function buildZMatrix(
     // of 20, 19, 18). Fix: estimate the per-row step from the partial span, then
     // extrapolate the full expected range. Scan direction (increasing vs. decreasing motor)
     // is inferred from the first acquired data point.
-    const kRows = n < nR * nC ? Math.max(1, Math.round(n / nC)) : nR;
+    // Math.ceil: a partially-collected row still occupies a distinct slow-motor position,
+    // so it must count as a row for the span estimate (Math.round would undercount by 1
+    // whenever n/nC is non-integer, collapsing two rows into one matrix cell).
+    const kRows = n < nR * nC ? Math.max(1, Math.ceil(n / nC)) : nR;
     if (n < nR * nC && nR > 1) {
       if (kRows >= 2) {
         const fullSpan = (m1Max - m1Min) / (kRows - 1) * (nR - 1);
