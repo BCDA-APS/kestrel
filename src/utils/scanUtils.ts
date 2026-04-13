@@ -35,7 +35,10 @@ export function buildZMatrix(
   const m2Flat = data[fastMotor];
   if (!zFlat || !m1Flat || !m2Flat) return null;
 
-  const n = zFlat.length;
+  // Cap n to the shortest of the three core arrays. During a live scan, columns can flush
+  // at different rates and arrive with mismatched lengths; accessing beyond the shortest
+  // gives undefined, which propagates to NaN indices and crashes sums[ri][ci].
+  const n = Math.min(zFlat.length, m1Flat.length, m2Flat.length);
 
   if (shape && shape[0] > 0 && shape[1] > 0) {
     // Shape-constrained path: bin motor positions into exactly shape[0] × shape[1] cells.
@@ -84,20 +87,21 @@ export function buildZMatrix(
       ? `${fastMotor}_user_setpoint`
       : (`${fastMotor}_setpoint` in data ? `${fastMotor}_setpoint` : null);
     const m2ForBin: number[] = (m2SpKey ? data[m2SpKey] : null) ?? m2Flat;
+    const loopN = Math.min(n, m2ForBin.length); // setpoint column may be shorter than encoder
 
     // When setpoints are available the range is exact and needs no outlier trimming.
     // When falling back to encoder readings, use the kRows-th percentile to tolerate
     // fly-scan turnaround triggers that land slightly outside the intended range.
     const m2Sorted = [...m2ForBin].sort((a, b) => a - b);
     const skip = (!m2SpKey && n >= nR * nC) ? Math.max(0, kRows - 1) : 0;
-    const m2Min = m2Sorted[Math.min(skip, n - 1)];
-    const m2Max = m2Sorted[Math.max(0, n - 1 - skip)];
+    const m2Min = m2Sorted[Math.min(skip, loopN - 1)];
+    const m2Max = m2Sorted[Math.max(0, loopN - 1 - skip)];
     const m2Span = m2Max - m2Min || 1;
 
     const sums:   number[][] = Array.from({ length: nR }, () => new Array(nC).fill(0));
     const counts: number[][] = Array.from({ length: nR }, () => new Array(nC).fill(0));
-    for (let k = 0; k < n; k++) {
-      const ri = nR === 1 ? 0 : Math.min(nR - 1, Math.round(((m1Flat[k] - m1Min) / m1Span) * (nR - 1)));
+    for (let k = 0; k < loopN; k++) {
+      const ri = nR === 1 ? 0 : Math.min(nR - 1, Math.max(0, Math.round(((m1Flat[k] - m1Min) / m1Span) * (nR - 1))));
       const ci = nC === 1 ? 0 : Math.min(nC - 1, Math.max(0, Math.round(((m2ForBin[k] - m2Min) / m2Span) * (nC - 1))));
       sums[ri][ci]   += zFlat[k];
       counts[ri][ci] += 1;
