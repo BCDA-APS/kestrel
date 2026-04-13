@@ -52,6 +52,29 @@ describe('buildZMatrix', () => {
     expect(result!.zMatrix[0].length).toBe(2);
   });
 
+  it('returns an empty zMatrix (not null) when n=0 and no shape is given', () => {
+    // This is the live-scan case: columns exist but no events have arrived yet.
+    // buildZMatrix returns { zMatrix: [], ... } via the unique-position path.
+    // The caller must guard against nRows===0 separately ([] is truthy, ![] === false).
+    const data = { m1: [], m2: [], z: [] };
+    const result = buildZMatrix(data, 'z', 'm1', 'm2');
+    expect(result).not.toBeNull();
+    expect(result!.zMatrix.length).toBe(0);
+    expect(result!.slowAxis.length).toBe(0);
+    expect(result!.fastAxis.length).toBe(0);
+  });
+
+  it('returns an all-NaN matrix when n=0 and shape is given', () => {
+    // Shape-constrained path allocates the full nR×nC grid up-front; with no data
+    // every cell stays NaN. This is fine — the heatmap renders as a solid neutral color.
+    const data = { m1: [], m2: [], z: [] };
+    const result = buildZMatrix(data, 'z', 'm1', 'm2', [3, 4]);
+    expect(result).not.toBeNull();
+    expect(result!.zMatrix.length).toBe(3);
+    expect(result!.zMatrix[0].length).toBe(4);
+    expect(result!.zMatrix.flat().every(v => isNaN(v))).toBe(true);
+  });
+
   it('sorts slow and fast axes ascending', () => {
     const data = {
       m1: [2, 2, 1, 1],

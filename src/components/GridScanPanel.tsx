@@ -166,7 +166,7 @@ function drawTicks(
   if (colorFn && zMin !== undefined && zMax !== undefined && plotW > 0) {
     const barY = h - PLOT_B + 40, barH = 13;
     for (let px = 0; px < Math.ceil(plotW); px++) {
-      const [r, g, b] = colorFn(px / (plotW - 1));
+      const [r, g, b] = colorFn(plotW > 1 ? px / (plotW - 1) : 0);
       ctx.fillStyle = `rgb(${r},${g},${b})`;
       ctx.fillRect(PLOT_L + px, barY, 1, barH);
     }
@@ -309,7 +309,7 @@ export default function GridScanPanel({ serverUrl, catalog, runId, shape, dimens
     const result = buildZMatrix(allData, effectiveZField, slowMotor, fastMotor, shape);
     if (!result) return { zMatrix: null, slowAxis: [], fastAxis: [] };
     return result;
-  }, [allData, effectiveZField, slowMotor, fastMotor]);
+  }, [allData, effectiveZField, slowMotor, fastMotor, shape]);
 
   const nRows = zMatrix?.length ?? 0;
   const nCols = zMatrix?.[0]?.length ?? 0;
@@ -525,6 +525,7 @@ export default function GridScanPanel({ serverUrl, catalog, runId, shape, dimens
   if (error) return <div className="h-full flex items-center justify-center text-red-400 text-sm">{error}</div>;
   if (!allData) return <div className="h-full flex items-center justify-center text-gray-400 text-sm">No data</div>;
   if (!zMatrix) return <div className="h-full flex items-center justify-center text-gray-400 text-sm">Select a Z field in the field table</div>;
+  if (nRows === 0 || nCols === 0) return <div className="h-full flex items-center justify-center text-gray-400 text-sm">Waiting for data…</div>;
 
   return (
     <div className="h-full flex flex-col gap-2 overflow-hidden">

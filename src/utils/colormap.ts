@@ -13,6 +13,7 @@ export const COLORMAPS: Record<string, RGB[]> = {
 
 export function interpolateColor(palette: RGB[], t: number): RGB {
   const clamped = Math.max(0, Math.min(1, t));
+  if (!isFinite(clamped)) return [...palette[0]] as RGB;
   const idx = clamped * (palette.length - 1);
   const lo = Math.floor(idx);
   const hi = Math.min(palette.length - 1, Math.ceil(idx));

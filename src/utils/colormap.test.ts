@@ -27,6 +27,15 @@ describe('interpolateColor', () => {
     expect(interpolateColor(palette, 2)).toEqual([255, 255, 255]);
   });
 
+  it('returns the first palette color instead of crashing when t is NaN', () => {
+    // NaN propagates through Math.max/min, then palette[NaN] = undefined → TypeError.
+    // The fix guards with !isFinite(clamped) and returns palette[0].
+    const palette = COLORMAPS.greys; // [[0,0,0],[255,255,255]]
+    expect(interpolateColor(palette, NaN)).toEqual([0, 0, 0]);
+    expect(interpolateColor(palette, Infinity)).toEqual([255, 255, 255]); // clamped to 1
+    expect(interpolateColor(palette, -Infinity)).toEqual([0, 0, 0]);     // clamped to 0
+  });
+
   it('returns an RGB triple with values in [0, 255]', () => {
     const palette = COLORMAPS.viridis;
     for (const t of [0, 0.1, 0.5, 0.9, 1]) {
