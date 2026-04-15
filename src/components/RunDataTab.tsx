@@ -8,6 +8,27 @@ type Props = {
 
 const catSeg = (c: string | null) => c ? `/${c}` : '';
 
+/** Paginate through a Tiled search URL and return all array-family item IDs. */
+async function fetchAllArrayIds(searchBase: string): Promise<string[]> {
+  const PAGE = 200;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let all: any[] = [];
+  let offset = 0;
+  while (true) {
+    const r = await fetch(`${searchBase}?page[limit]=${PAGE}&page[offset]=${offset}`);
+    if (!r.ok) break;
+    const json = await r.json();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const chunk: any[] = json.data ?? [];
+    all = all.concat(chunk);
+    const total: number = json.meta?.count ?? all.length;
+    offset += chunk.length;
+    if (chunk.length === 0 || offset >= total) break;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return all.filter((i: any) => i.attributes?.structure_family === 'array').map((i: any) => i.id);
+}
+
 type TableSource = {
   tableUrl: string;
   // Base path for fetching individual arrays if table/full returns 404
@@ -45,34 +66,13 @@ async function resolveTableSource(serverUrl: string, catalog: string | null, run
   // Case 3: sub-nodes (MongoDB adapter: primary/data or primary/internal)
   for (const sub of ['data', 'internal']) {
     const subPath = `${cs}/${runId}/${stream}/${sub}`;
-    const firstR = await fetch(`${serverUrl}/api/v1/search${subPath}?page[limit]=200&page[offset]=0`);
-    if (firstR.ok) {
-      const firstJson = await firstR.json();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let allItems: any[] = firstJson.data ?? [];
-      const total: number = firstJson.meta?.count ?? allItems.length;
-      // Paginate if there are more than 200 columns (e.g. MongoDB adapter with large baseline)
-      let offset = allItems.length;
-      while (offset < total) {
-        const pageR = await fetch(`${serverUrl}/api/v1/search${subPath}?page[limit]=200&page[offset]=${offset}`);
-        if (!pageR.ok) break;
-        const pageJson = await pageR.json();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const chunk: any[] = pageJson.data ?? [];
-        if (chunk.length === 0) break;
-        allItems = allItems.concat(chunk);
-        offset += chunk.length;
-      }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const arrayItems: any[] = allItems.filter((item: any) => item.attributes?.structure_family === 'array');
-      if (arrayItems.length > 0) {
-        return {
-          tableUrl: `${serverUrl}/api/v1/table/full${subPath}?format=application/json`,
-          arrayBase: `${serverUrl}/api/v1/array/full${subPath}`,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          ...{ columns: arrayItems.map((item: any) => item.id) },
-        } as TableSource & { columns: string[] };
-      }
+    const columns = await fetchAllArrayIds(`${serverUrl}/api/v1/search${subPath}`);
+    if (columns.length > 0) {
+      return {
+        tableUrl: `${serverUrl}/api/v1/table/full${subPath}?format=application/json`,
+        arrayBase: `${serverUrl}/api/v1/array/full${subPath}`,
+        ...{ columns },
+      } as TableSource & { columns: string[] };
     }
   }
 
@@ -146,14 +146,8 @@ useEffect(() => {
           let d = await r.json();
           // Also fetch any external-file arrays (e.g. MCA detectors) not included in table/full
           if (source.arrayBase) {
-            const searchUrl = `${source.arrayBase.replace('/api/v1/array/full', '/api/v1/search')}?page[limit]=200`;
-            const sj = await fetch(searchUrl).then(sr => sr.ok ? sr.json() : { data: [] });
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const extCols: string[] = (sj.data ?? [])
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              .filter((i: any) => i.attributes?.structure_family === 'array')
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              .map((i: any) => i.id)
+            const searchBase = source.arrayBase.replace('/api/v1/array/full', '/api/v1/search');
+            const extCols: string[] = (await fetchAllArrayIds(searchBase))
               .filter((id: string) => !(id in d));
             if (!cancelled && extCols.length > 0) {
               const extData = await fetchColumnarData(source.arrayBase, extCols);
@@ -164,10 +158,7 @@ useEffect(() => {
         } else if (r.status === 404 && source.arrayBase) {
           // Older servers (MongoDB adapter) may not support table/full — fetch columns individually
           const cols: string[] = (source as TableSource & { columns?: string[] }).columns
-            ?? await fetch(`${source.arrayBase.replace('/api/v1/array/full', '/api/v1/search')}?page[limit]=200`)
-              .then(sr => sr.json())
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              .then(sj => (sj.data ?? []).filter((i: any) => i.attributes?.structure_family === 'array').map((i: any) => i.id));
+            ?? await fetchAllArrayIds(source.arrayBase.replace('/api/v1/array/full', '/api/v1/search'));
           if (cancelled) return;
           const d = await fetchColumnarData(source.arrayBase, cols);
           if (!cancelled) setData(d);
