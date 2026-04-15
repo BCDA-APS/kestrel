@@ -45,16 +45,30 @@ async function resolveTableSource(serverUrl: string, catalog: string | null, run
   // Case 3: sub-nodes (MongoDB adapter: primary/data or primary/internal)
   for (const sub of ['data', 'internal']) {
     const subPath = `${cs}/${runId}/${stream}/${sub}`;
-    const subR = await fetch(`${serverUrl}/api/v1/search${subPath}?page[limit]=200`);
-    if (subR.ok) {
-      const subJson = await subR.json();
+    const firstR = await fetch(`${serverUrl}/api/v1/search${subPath}?page[limit]=200&page[offset]=0`);
+    if (firstR.ok) {
+      const firstJson = await firstR.json();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const arrayItems: any[] = (subJson.data ?? []).filter((item: any) => item.attributes?.structure_family === 'array');
+      let allItems: any[] = firstJson.data ?? [];
+      const total: number = firstJson.meta?.count ?? allItems.length;
+      // Paginate if there are more than 200 columns (e.g. MongoDB adapter with large baseline)
+      let offset = allItems.length;
+      while (offset < total) {
+        const pageR = await fetch(`${serverUrl}/api/v1/search${subPath}?page[limit]=200&page[offset]=${offset}`);
+        if (!pageR.ok) break;
+        const pageJson = await pageR.json();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const chunk: any[] = pageJson.data ?? [];
+        if (chunk.length === 0) break;
+        allItems = allItems.concat(chunk);
+        offset += chunk.length;
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const arrayItems: any[] = allItems.filter((item: any) => item.attributes?.structure_family === 'array');
       if (arrayItems.length > 0) {
         return {
           tableUrl: `${serverUrl}/api/v1/table/full${subPath}?format=application/json`,
           arrayBase: `${serverUrl}/api/v1/array/full${subPath}`,
-          // Attach column names discovered during probing so we don't need to re-fetch
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ...{ columns: arrayItems.map((item: any) => item.id) },
         } as TableSource & { columns: string[] };
