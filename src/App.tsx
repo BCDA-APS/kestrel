@@ -179,6 +179,7 @@ export default function App() {
   const [selectedRunShape, setSelectedRunShape] = useState<number[] | null>(null);
   const [selectedRunHintsDimensions, setSelectedRunHintsDimensions] = useState<string[][] | null>(null);
   const [gridZField, setGridZField] = useState('');
+  const [gridStream, setGridStream] = useState('');
   const [showGridHeatmap, setShowGridHeatmap] = useState(false);
   const [showGrid1D, setShowGrid1D] = useState(false);
   const [imageState, setImageState] = useState<{ fieldName: string; stream: string; dataSubNode: string; shape: number[] } | null>(null);
@@ -1247,8 +1248,8 @@ export default function App() {
                       onLivePlot={livePlot}
                       onRemoveRunTraces={removeRunTraces}
                       onZSelect={isGridScan ? setGridZField : undefined}
-                      onGridPlot={isGridScan ? () => { setShowGridHeatmap(true); setShowGrid1D(false); setCenterTab('graph'); } : undefined}
-                      onGrid1DPlot={isGridScan ? () => { setShowGrid1D(true); setShowGridHeatmap(false); setCenterTab('graph'); } : undefined}
+                      onGridPlot={isGridScan ? (stream) => { setGridStream(stream); setShowGridHeatmap(true); setShowGrid1D(false); setCenterTab('graph'); } : undefined}
+                      onGrid1DPlot={isGridScan ? (stream) => { setGridStream(stream); setShowGrid1D(true); setShowGridHeatmap(false); setCenterTab('graph'); } : undefined}
                       onImageOpen={(fieldName, stream, dataSubNode, shape) => { setImageState({ fieldName, stream, dataSubNode, shape }); setPanel(null); setFitResults(null); setCenterTab('graph'); }}
                     />
                   </div>
@@ -1310,7 +1311,7 @@ export default function App() {
                   ) : showGrid1D && isGridScan ? (
                     <GridScan1DPanel serverUrl={serverUrl} catalog={selectedCatalog} runId={selectedRunId} dimensions={selectedRunHintsDimensions!} zField={gridZField} runAcquiring={selectedRunAcquiring} onClose={() => setShowGrid1D(false)} />
                   ) : showGridHeatmap && isGridScan ? (
-                    <GridScanPanel serverUrl={serverUrl} catalog={selectedCatalog} runId={selectedRunId} shape={selectedRunShape as [number, number] | null} dimensions={selectedRunHintsDimensions!} zField={gridZField} runAcquiring={selectedRunAcquiring} onClose={() => setShowGridHeatmap(false)} onAnalyzeCut={(x, y, xLabel, yLabel, title) => { setShowGridHeatmap(false); setPanel({ id: crypto.randomUUID(), type: 'xy', traces: [{ x, y, xLabel, yLabel, runLabel: selectedRunLabel, runId: selectedRunId }], title }); setFitResults(null); setShowDerivative(false); }} />
+                    <GridScanPanel serverUrl={serverUrl} catalog={selectedCatalog} runId={selectedRunId} shape={selectedRunShape as [number, number] | null} dimensions={selectedRunHintsDimensions!} zField={gridZField} stream={gridStream} runAcquiring={selectedRunAcquiring} onClose={() => setShowGridHeatmap(false)} onAnalyzeCut={(x, y, xLabel, yLabel, title) => { setShowGridHeatmap(false); setPanel({ id: crypto.randomUUID(), type: 'xy', traces: [{ x, y, xLabel, yLabel, runLabel: selectedRunLabel, runId: selectedRunId }], title }); setFitResults(null); setShowDerivative(false); }} />
                   ) : panel ? (
                     <VisualizationPanel panel={panel} onRemove={() => { setPanel(null); setFitResults(null); if (isGridScan) setShowGridHeatmap(true); }} onRemoveTrace={handleRemoveTrace} onStopLive={stopLive} onLiveTracesUpdate={handleLiveTracesUpdate} extraTraces={derivativeTraces} onRemoveExtraTrace={() => setShowDerivative(false)} xLog={xLog} yLog={yLog} fitResults={fitResults} traceStyles={traceStyles} traceAxes={traceAxes} cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y} onPlotClick={handlePlotClick} showWaterfall={showWaterfall} waterfallOffset={waterfallOffset} />
                   ) : (
@@ -1418,7 +1419,7 @@ export default function App() {
                   ) : showGrid1D && isGridScan ? (
                     <GridScan1DPanel serverUrl={serverUrl} catalog={selectedCatalog} runId={selectedRunId} dimensions={selectedRunHintsDimensions!} zField={gridZField} runAcquiring={selectedRunAcquiring} onClose={() => setShowGrid1D(false)} />
                   ) : showGridHeatmap && isGridScan ? (
-                    <GridScanPanel serverUrl={serverUrl} catalog={selectedCatalog} runId={selectedRunId} shape={selectedRunShape as [number, number] | null} dimensions={selectedRunHintsDimensions!} zField={gridZField} runAcquiring={selectedRunAcquiring} onClose={() => setShowGridHeatmap(false)} onAnalyzeCut={(x, y, xLabel, yLabel, title) => { setShowGridHeatmap(false); setPanel({ id: crypto.randomUUID(), type: 'xy', traces: [{ x, y, xLabel, yLabel, runLabel: selectedRunLabel, runId: selectedRunId }], title }); setFitResults(null); setShowDerivative(false); }} />
+                    <GridScanPanel serverUrl={serverUrl} catalog={selectedCatalog} runId={selectedRunId} shape={selectedRunShape as [number, number] | null} dimensions={selectedRunHintsDimensions!} zField={gridZField} stream={gridStream} runAcquiring={selectedRunAcquiring} onClose={() => setShowGridHeatmap(false)} onAnalyzeCut={(x, y, xLabel, yLabel, title) => { setShowGridHeatmap(false); setPanel({ id: crypto.randomUUID(), type: 'xy', traces: [{ x, y, xLabel, yLabel, runLabel: selectedRunLabel, runId: selectedRunId }], title }); setFitResults(null); setShowDerivative(false); }} />
                   ) : panel ? (
                     <VisualizationPanel panel={panel} onRemove={() => { setPanel(null); setFitResults(null); if (isGridScan) setShowGridHeatmap(true); }} onRemoveTrace={handleRemoveTrace} onStopLive={stopLive} onLiveTracesUpdate={handleLiveTracesUpdate} extraTraces={derivativeTraces} onRemoveExtraTrace={() => setShowDerivative(false)} xLog={xLog} yLog={yLog} fitResults={fitResults} traceStyles={traceStyles} traceAxes={traceAxes} cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y} onPlotClick={handlePlotClick} showWaterfall={showWaterfall} waterfallOffset={waterfallOffset} />
                   ) : (

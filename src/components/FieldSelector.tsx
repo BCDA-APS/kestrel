@@ -26,9 +26,9 @@ type FieldSelectorProps = {
   /** When provided, switches to single-select Z mode for heatmap field selection */
   onZSelect?: (field: string) => void;
   /** Called when the user clicks "Plot grid" in z-mode */
-  onGridPlot?: () => void;
+  onGridPlot?: (stream: string) => void;
   /** Called when the user clicks "Plot 1D" in z-mode */
-  onGrid1DPlot?: () => void;
+  onGrid1DPlot?: (stream: string) => void;
   /** When provided, image fields (shape ≥ 2D) show a View button instead of X/Y controls */
   onImageOpen?: (fieldName: string, stream: string, dataSubNode: string, shape: number[]) => void;
 };
@@ -647,12 +647,12 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
           {zMode ? (
             <div className="ml-auto flex items-center gap-1">
               <button
-                onClick={onGridPlot}
+                onClick={() => onGridPlot?.(selectedStream)}
                 disabled={yFields.length === 0}
                 className="px-2 py-0.5 text-xs bg-sky-600 text-white rounded hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
               >Plot grid</button>
               <button
-                onClick={onGrid1DPlot}
+                onClick={() => onGrid1DPlot?.(selectedStream)}
                 disabled={yFields.length === 0}
                 className="px-2 py-0.5 text-xs bg-sky-600 text-white rounded hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
               >Plot 1D</button>

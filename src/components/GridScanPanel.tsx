@@ -15,6 +15,7 @@ type Props = {
   shape: [number, number] | null;
   dimensions: string[][];
   zField?: string;
+  stream?: string;
   runAcquiring?: boolean;
   onClose?: () => void;
   onAnalyzeCut?: (x: number[], y: number[], xLabel: string, yLabel: string, title: string) => void;
@@ -27,15 +28,19 @@ type DragState =
 
 const catSeg = (c: string | null) => c ? `/${c}` : '';
 
-// Mirrors RunDataTab.resolveTableSource: finds the correct table/full URL for the primary stream.
-async function resolveTableUrl(serverUrl: string, cs: string, runId: string): Promise<{ tableUrl: string; arrayBase: string | null; columns?: string[] } | null> {
-  const sj = await fetch(`${serverUrl}/api/v1/search${cs}/${runId}?page[limit]=50`).then(r => r.json());
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const streams: string[] = (sj.data ?? []).map((d: any) => d.id);
-  const stream = streams.includes('primary') ? 'primary' : (streams[0] ?? '');
-  if (!stream) return null;
+// Mirrors RunDataTab.resolveTableSource: finds the correct table/full URL for the given stream.
+// When `streamName` is omitted, auto-selects 'primary' (or the first available stream).
+async function resolveTableUrl(serverUrl: string, cs: string, runId: string, streamName?: string): Promise<{ tableUrl: string; arrayBase: string | null; columns?: string[] } | null> {
+  let resolvedStream = streamName;
+  if (!resolvedStream) {
+    const sj = await fetch(`${serverUrl}/api/v1/search${cs}/${runId}?page[limit]=50`).then(r => r.json());
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const streams: string[] = (sj.data ?? []).map((d: any) => d.id);
+    resolvedStream = streams.includes('primary') ? 'primary' : (streams[0] ?? '');
+  }
+  if (!resolvedStream) return null;
 
-  const fj = await fetch(`${serverUrl}/api/v1/search${cs}/${runId}/${stream}?page[limit]=200`).then(r => r.json());
+  const fj = await fetch(`${serverUrl}/api/v1/search${cs}/${runId}/${resolvedStream}?page[limit]=200`).then(r => r.json());
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const items: any[] = fj.data ?? [];
 
@@ -43,7 +48,7 @@ async function resolveTableUrl(serverUrl: string, cs: string, runId: string): Pr
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tblItem = items.find((i: any) => i.attributes?.structure_family === 'table');
   if (tblItem) {
-    return { tableUrl: `${serverUrl}/api/v1/table/full${cs}/${runId}/${stream}/${tblItem.id}?format=application/json`, arrayBase: null };
+    return { tableUrl: `${serverUrl}/api/v1/table/full${cs}/${runId}/${resolvedStream}/${tblItem.id}?format=application/json`, arrayBase: null };
   }
 
   // Case 2: arrays directly under stream
@@ -51,14 +56,14 @@ async function resolveTableUrl(serverUrl: string, cs: string, runId: string): Pr
   const hasArrays = items.some((i: any) => i.attributes?.structure_family === 'array');
   if (hasArrays) {
     return {
-      tableUrl: `${serverUrl}/api/v1/table/full${cs}/${runId}/${stream}?format=application/json`,
-      arrayBase: `${serverUrl}/api/v1/array/full${cs}/${runId}/${stream}`,
+      tableUrl: `${serverUrl}/api/v1/table/full${cs}/${runId}/${resolvedStream}?format=application/json`,
+      arrayBase: `${serverUrl}/api/v1/array/full${cs}/${runId}/${resolvedStream}`,
     };
   }
 
   // Case 3: sub-nodes (MongoDB adapter: primary/data or primary/internal)
   for (const sub of ['data', 'internal']) {
-    const subPath = `${cs}/${runId}/${stream}/${sub}`;
+    const subPath = `${cs}/${runId}/${resolvedStream}/${sub}`;
     const subR = await fetch(`${serverUrl}/api/v1/search${subPath}?page[limit]=200`);
     if (subR.ok) {
       const subJson = await subR.json();
@@ -77,8 +82,8 @@ async function resolveTableUrl(serverUrl: string, cs: string, runId: string): Pr
   return null;
 }
 
-export async function fetchAllColumns(serverUrl: string, cs: string, runId: string): Promise<Record<string, number[]> | null> {
-  const source = await resolveTableUrl(serverUrl, cs, runId);
+export async function fetchAllColumns(serverUrl: string, cs: string, runId: string, stream?: string): Promise<Record<string, number[]> | null> {
+  const source = await resolveTableUrl(serverUrl, cs, runId, stream);
   if (!source) return null;
 
   // Primary path: table/full returns all columns at once as {colName: number[]}
@@ -244,11 +249,23 @@ function drawHeatmap(
   }
 }
 
-export default function GridScanPanel({ serverUrl, catalog, runId, shape, dimensions, zField, runAcquiring, onClose, onAnalyzeCut }: Props) {
+export default function GridScanPanel({ serverUrl, catalog, runId, shape, dimensions, zField, stream, runAcquiring, onClose, onAnalyzeCut }: Props) {
   const slowMotor = dimensions[0]?.[0] ?? '';
   const fastMotor = dimensions[1]?.[0] ?? '';
 
   const [allData, setAllData] = useState<Record<string, number[]> | null>(null);
+  // When loading a non-primary stream (e.g. dichro_monitor), the primary motor column names
+  // may not exist. Fall back to columns that look like positioners (dichro_positioner1/2).
+  const effectiveSlowMotor = useMemo(() => {
+    if (!allData || slowMotor in allData) return slowMotor;
+    const positioners = Object.keys(allData).filter(k => /positioner/i.test(k));
+    return positioners[0] ?? slowMotor;
+  }, [allData, slowMotor]);
+  const effectiveFastMotor = useMemo(() => {
+    if (!allData || fastMotor in allData) return fastMotor;
+    const positioners = Object.keys(allData).filter(k => /positioner/i.test(k));
+    return positioners.find(k => k !== effectiveSlowMotor) ?? fastMotor;
+  }, [allData, fastMotor, effectiveSlowMotor]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [crossRow, setCrossRow] = useState<number | null>(null);
@@ -269,10 +286,10 @@ export default function GridScanPanel({ serverUrl, catalog, runId, shape, dimens
 
   const loadData = useCallback(() => {
     const cs = catSeg(catalog);
-    return fetchAllColumns(serverUrl, cs, runId)
+    return fetchAllColumns(serverUrl, cs, runId, stream || undefined)
       .then(d => setAllData(d))
       .catch(e => setError(String(e)));
-  }, [serverUrl, catalog, runId]);
+  }, [serverUrl, catalog, runId, stream]);
 
   useEffect(() => {
     setAllData(null);
@@ -293,23 +310,23 @@ export default function GridScanPanel({ serverUrl, catalog, runId, shape, dimens
 
   const effectiveZField = useMemo(() => {
     if (!allData) return '';
-    const motors = new Set([slowMotor, fastMotor]);
+    const motors = new Set([effectiveSlowMotor, effectiveFastMotor]);
     const autoField = Object.keys(allData).find(f => !motors.has(f) && f !== 'time') ?? '';
     // Use the prop only if it actually exists in allData; otherwise fall back to auto-pick
     if (zField && allData[zField]?.length > 0) return zField;
     return autoField;
-  }, [zField, allData, slowMotor, fastMotor]);
+  }, [zField, allData, effectiveSlowMotor, effectiveFastMotor]);
 
   const { zMatrix, slowAxis, fastAxis } = useMemo<{
     zMatrix: number[][] | null; slowAxis: number[]; fastAxis: number[];
   }>(() => {
-    if (!allData || !effectiveZField || !slowMotor || !fastMotor) {
+    if (!allData || !effectiveZField || !effectiveSlowMotor || !effectiveFastMotor) {
       return { zMatrix: null, slowAxis: [], fastAxis: [] };
     }
-    const result = buildZMatrix(allData, effectiveZField, slowMotor, fastMotor, shape);
+    const result = buildZMatrix(allData, effectiveZField, effectiveSlowMotor, effectiveFastMotor, shape);
     if (!result) return { zMatrix: null, slowAxis: [], fastAxis: [] };
     return result;
-  }, [allData, effectiveZField, slowMotor, fastMotor, shape]);
+  }, [allData, effectiveZField, effectiveSlowMotor, effectiveFastMotor, shape]);
 
   const nRows = zMatrix?.length ?? 0;
   const nCols = zMatrix?.[0]?.length ?? 0;
@@ -550,7 +567,7 @@ export default function GridScanPanel({ serverUrl, catalog, runId, shape, dimens
         )}
         {crossRow !== null && crossCol !== null && (
           <span className="text-xs text-sky-600 font-mono">
-            {slowMotor}={slowAxis[crossRow]?.toPrecision(4)} · {fastMotor}={fastAxis[crossCol]?.toPrecision(4)}
+            {effectiveSlowMotor}={slowAxis[crossRow]?.toPrecision(4)} · {effectiveFastMotor}={fastAxis[crossCol]?.toPrecision(4)}
           </span>
         )}
         {onClose && (
@@ -591,10 +608,10 @@ export default function GridScanPanel({ serverUrl, catalog, runId, shape, dimens
           <canvas ref={ticksCanvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
           {/* Axis title labels */}
           <div className="absolute top-0 left-0 right-0 text-center text-[12px] font-medium text-gray-500 pt-1 pointer-events-none">
-            {fastMotor}
+            {effectiveFastMotor}
           </div>
           <div className="absolute top-0 bottom-0 left-0 flex items-center justify-center pointer-events-none" style={{ width: PLOT_L }}>
-            <span className="text-[12px] font-medium text-gray-500 whitespace-nowrap" style={{ transform: 'translateX(-10px) rotate(-90deg)' }}>{slowMotor}</span>
+            <span className="text-[12px] font-medium text-gray-500 whitespace-nowrap" style={{ transform: 'translateX(-10px) rotate(-90deg)' }}>{effectiveSlowMotor}</span>
           </div>
         </div>
 
@@ -615,15 +632,15 @@ export default function GridScanPanel({ serverUrl, catalog, runId, shape, dimens
                       line: { color: 'rgba(100,100,100,0.45)', dash: 'dash', width: 1 }, hoverinfo: 'skip' as const, showlegend: false },
                   ]}
                   xAxisTitle={effectiveZField}
-                  yAxisTitle={slowMotor}
+                  yAxisTitle={effectiveSlowMotor}
                   yAxisRange={vertCutYRange}
                   xAxisLayout={{ title: { text: effectiveZField, font: TITLE_FONT } }}
-                  yAxisLayout={{ title: { text: slowMotor, font: TITLE_FONT } }}
+                  yAxisLayout={{ title: { text: effectiveSlowMotor, font: TITLE_FONT } }}
                   className="w-full h-full"
                 />
                 {onAnalyzeCut && (
                   <button
-                    onClick={() => onAnalyzeCut(vertCut.x, vertCut.y, slowMotor, effectiveZField, `${effectiveZField} vs ${slowMotor} (vertical cut)`)}
+                    onClick={() => onAnalyzeCut(vertCut.x, vertCut.y, effectiveSlowMotor, effectiveZField, `${effectiveZField} vs ${effectiveSlowMotor} (vertical cut)`)}
                     className="absolute top-1 right-1 text-[10px] px-1.5 py-0.5 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded text-gray-600"
                     title="Open in analysis panel"
                   >
@@ -655,16 +672,16 @@ export default function GridScanPanel({ serverUrl, catalog, runId, shape, dimens
                     { x: [fastAxis[crossCol!], fastAxis[crossCol!]], y: [globalZMin, globalZMax], type: 'scatter', mode: 'lines',
                       line: { color: 'rgba(100,100,100,0.45)', dash: 'dash', width: 1 }, hoverinfo: 'skip' as const, showlegend: false },
                   ]}
-                  xAxisTitle={fastMotor}
+                  xAxisTitle={effectiveFastMotor}
                   yAxisTitle={effectiveZField}
                   xAxisRange={horizCutXRange}
-                  xAxisLayout={{ title: { text: fastMotor, font: TITLE_FONT } }}
+                  xAxisLayout={{ title: { text: effectiveFastMotor, font: TITLE_FONT } }}
                   yAxisLayout={{ title: { text: effectiveZField, font: TITLE_FONT } }}
                   className="w-full h-full"
                 />
                 {onAnalyzeCut && (
                   <button
-                    onClick={() => onAnalyzeCut(horizCut.x, horizCut.y, fastMotor, effectiveZField, `${effectiveZField} vs ${fastMotor} (horizontal cut)`)}
+                    onClick={() => onAnalyzeCut(horizCut.x, horizCut.y, effectiveFastMotor, effectiveZField, `${effectiveZField} vs ${effectiveFastMotor} (horizontal cut)`)}
                     className="absolute top-1 right-1 text-[10px] px-1.5 py-0.5 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded text-gray-600"
                     title="Open in analysis panel"
                   >
