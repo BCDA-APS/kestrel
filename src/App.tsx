@@ -209,7 +209,7 @@ export default function App() {
   const [centerTab, setCenterTab] = useState<'graph' | 'data' | 'metadata' | 'summary'>('graph');
   const [appTab, setAppTab] = useState<'visualizer' | 'qserver'>('visualizer');
   const [splitView, setSplitView] = useState(false);
-  const [settings, setSettings] = useState<{ qserverEnabled?: boolean; detectorDefault?: 'smart' | 'hints' | 'last'; autoAddMax?: number }>(() => {
+  const [settings, setSettings] = useState<{ qserverEnabled?: boolean; detectorDefault?: 'smart' | 'hints' | 'last'; autoAddMax?: number; dichroMode?: boolean }>(() => {
     try { return JSON.parse(localStorage.getItem('appSettings') ?? '{}'); } catch { return {}; }
   });
   const [showSettings, setShowSettings] = useState(false);
@@ -954,6 +954,11 @@ export default function App() {
                   />
                   <span className="text-white text-xs">oldest trace dropped when exceeded</span>
                 </label>
+                <p className="text-sky-400 text-[10px] font-medium uppercase tracking-wide mt-3 mb-1">Dichro mode</p>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={settings.dichroMode !== false} onChange={e => updateSetting('dichroMode', e.target.checked)} className="accent-sky-500" />
+                  <span className="text-white text-xs">Auto-select dichro_monitor + dichro_xmcd</span>
+                </label>
               </div>
             )}
           </div>
@@ -1139,6 +1144,11 @@ export default function App() {
                   />
                   <span className="text-white text-xs">oldest trace dropped when exceeded</span>
                 </label>
+                <p className="text-sky-400 text-[10px] font-medium uppercase tracking-wide mt-3 mb-1">Dichro mode</p>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={settings.dichroMode !== false} onChange={e => updateSetting('dichroMode', e.target.checked)} className="accent-sky-500" />
+                  <span className="text-white text-xs">Auto-select dichro_monitor + dichro_xmcd</span>
+                </label>
               </div>
             )}
           </div>
@@ -1240,6 +1250,7 @@ export default function App() {
                       runDetectors={selectedRunDetectors}
                       runHintsDetectors={selectedRunHintsDetectors}
                       detectorDefault={settings.detectorDefault ?? 'smart'}
+                      dichroMode={settings.dichroMode !== false}
                       runMotors={selectedRunMotors}
                       runAcquiring={selectedRunAcquiring}
                       onPlot={plot}

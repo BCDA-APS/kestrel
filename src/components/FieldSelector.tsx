@@ -31,6 +31,8 @@ type FieldSelectorProps = {
   onGrid1DPlot?: (stream: string) => void;
   /** When provided, image fields (shape ≥ 2D) show a View button instead of X/Y controls */
   onImageOpen?: (fieldName: string, stream: string, dataSubNode: string, shape: number[]) => void;
+  /** Dichro mode: when true, auto-selects dichro_monitor stream and dichro_xmcd detector whenever available */
+  dichroMode?: boolean;
 };
 
 export type FieldSelectorHandle = { schedulePlot: () => void; scheduleLive: () => void; removeY: (yLabel: string) => void; scheduleImageOpen: () => void };
@@ -41,6 +43,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   serverUrl, catalog, runId, runLabel,
   runDetectors, runHintsDetectors = [], detectorDefault = 'smart', runMotors, runAcquiring,
   onPlot, onAddTraces, onAddTracesRight, onLivePlot, onRemoveRunTraces, onZSelect, onGridPlot, onGrid1DPlot, onImageOpen,
+  dichroMode = true,
 }, ref) {
   const zMode = !!onZSelect;
   // A field is a 2D image if it has ≥2 shape dimensions with the last two both > 1
@@ -133,6 +136,11 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
         const names: string[] = (json.data ?? []).map((item: any) => item.id);
         const nonBaseline = names.filter(n => n !== 'baseline');
         setStreams(nonBaseline);
+        // Dichro mode: always prefer dichro_monitor when available, regardless of last manual choice
+        if (dichroMode && nonBaseline.includes('dichro_monitor')) {
+          setSelectedStream('dichro_monitor');
+          return;
+        }
         const preferred = lastManualStreamRef.current;
         const streamRestored = !!preferred && nonBaseline.includes(preferred);
         if (preferred && !streamRestored) {
@@ -352,6 +360,12 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     if (sortedFields.length === 0) return;
     const fieldNames = new Set(sortedFields.map(f => f.name));
 
+    // Dichro mode: when dichro_monitor is active, always default to dichro_xmcd
+    if (dichroMode && selectedStream === 'dichro_monitor' && fieldNames.has('dichro_xmcd')) {
+      setYFields(['dichro_xmcd']);
+      return;
+    }
+
     if (lastXRef.current && fieldNames.has(lastXRef.current) &&
         (!lastXWasMotorRef.current || matchesDev(lastXRef.current, runMotors))) {
       setXField(lastXRef.current);
@@ -387,7 +401,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
       setYFields(firstDet ? [firstDet.name] : []);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortedFields, runMotors, runDetectors, runHintsDetectors, detectorDefault, runId]);
+  }, [sortedFields, runMotors, runDetectors, runHintsDetectors, detectorDefault, runId, dichroMode, selectedStream]);
 
   // In z-mode, emit the selected field whenever yFields[0] changes (auto-select or user click)
   useEffect(() => {
