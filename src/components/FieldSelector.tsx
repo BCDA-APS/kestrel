@@ -129,10 +129,12 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     setStreams([]);
     setSelectedStream('');
     fieldsRunIdRef.current = '';
+    let cancelled = false;
     fetch(`${serverUrl}/api/v1/search${catSeg(catalog)}/${runId}?page[limit]=50`)
       .then(r => r.json())
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .then(json => {
+        if (cancelled) return;
         const names: string[] = (json.data ?? []).map((item: any) => item.id);
         const nonBaseline = names.filter(n => n !== 'baseline');
         setStreams(nonBaseline);
@@ -153,7 +155,8 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
         setSelectedStream(streamRestored ? preferred : nonBaseline.includes('primary') ? 'primary' : (nonBaseline[0] ?? ''));
       })
       .catch(() => {});
-  }, [serverUrl, catalog, runId]);
+    return () => { cancelled = true; };
+  }, [serverUrl, catalog, runId, dichroMode]);
 
   const fetchFields = useCallback(() => {
     if (!selectedStream) return;
