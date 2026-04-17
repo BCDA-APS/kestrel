@@ -60,6 +60,12 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   const lastManualStreamRef = useRef('');
   // Tracks which runId the current `fields` were loaded for; prevents stale-fields auto-select
   const fieldsRunIdRef = useRef('');
+  // Ref so fetchFields can read the latest runId without having it as a useCallback dep.
+  // This prevents fetchFields from firing with a stale selectedStream when runId changes:
+  // the stream-loading effect resets selectedStream, so fetchFields must only re-run after
+  // selectedStream is properly resolved — not the moment runId changes.
+  const runIdRef = useRef(runId);
+  runIdRef.current = runId;
   // True after we removed traces via onRemoveRunTraces, so the next Y check re-creates the panel
   const removedTracesRef = useRef(false);
   const [adding, setAdding] = useState(false);
@@ -130,9 +136,11 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
         const preferred = lastManualStreamRef.current;
         const streamRestored = !!preferred && nonBaseline.includes(preferred);
         if (preferred && !streamRestored) {
-          // Had a stream preference but it's not available — clear field memory so auto-pick runs fresh
+          // The preferred stream isn't on this run; clear X memory so auto-pick uses a motor from
+          // the current stream. Leave lastYRef intact — validLastY filtering (fieldNames.has) in the
+          // auto-select effect already handles fields that don't exist here, so the detector is
+          // remembered when the user returns to a run that does have the preferred stream.
           lastXRef.current = '';
-          lastYRef.current = [];
         }
         setSelectedStream(streamRestored ? preferred : nonBaseline.includes('primary') ? 'primary' : (nonBaseline[0] ?? ''));
       })
@@ -141,6 +149,9 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
 
   const fetchFields = useCallback(() => {
     if (!selectedStream) return;
+    // Capture runId at call time so that async completions below don't race against
+    // a subsequent runId change that kicked off a newer fetch.
+    const runId = runIdRef.current;
     fieldsRunIdRef.current = '';
     setLoading(true);
     setFields([]);
@@ -304,7 +315,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
       })
       .catch(() => setError('Failed to load fields'))
       .finally(() => setLoading(false));
-  }, [serverUrl, catalog, runId, selectedStream]);
+  }, [serverUrl, catalog, selectedStream]); // runId intentionally omitted: accessed via runIdRef so fetchFields only re-fires when selectedStream changes (not on every runId change with a stale stream)
 
   useEffect(() => { fetchFields(); }, [fetchFields]);
 
