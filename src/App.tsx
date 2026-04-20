@@ -184,6 +184,10 @@ export default function App() {
   const [showGrid1D, setShowGrid1D] = useState(false);
   const [imageState, setImageState] = useState<{ fieldName: string; stream: string; dataSubNode: string; shape: number[] } | null>(null);
   const pendingGridHeatmapRef = useRef(false);
+  // Set true on single-click of a different acquiring run; metadata effect auto-shows
+  // the grid if the run turns out to be a grid scan. Unlike pendingGridHeatmapRef,
+  // this does NOT suppress livePlot, so there is no latency impact for non-grid runs.
+  const pendingAutoGridRef = useRef(false);
   const [runPage, setRunPage] = useState(0);
   const [autoFollow, setAutoFollow] = useState(false);
   const [autoAdd, setAutoAdd] = useState(false);
@@ -301,12 +305,20 @@ export default function App() {
             fieldSelectorRef.current?.scheduleImageOpen();
           }
         }
+        // Single-click auto-grid: show heatmap if this acquiring run turns out to be a
+        // grid scan. Unlike the double-click path, livePlot is NOT suppressed here so
+        // there is zero latency impact for non-grid runs.
+        if (pendingAutoGridRef.current) {
+          pendingAutoGridRef.current = false;
+          if (isGrid) fieldSelectorRef.current?.scheduleGridPlot(selectedRunId);
+        }
       })
       .catch(() => {
         if (pendingGridHeatmapRef.current) {
           pendingGridHeatmapRef.current = false;
           fieldSelectorRef.current?.scheduleImageOpen();
         }
+        pendingAutoGridRef.current = false;
       });
   }, [selectedRunId, serverUrl, selectedCatalog]);
 
@@ -1201,13 +1213,21 @@ export default function App() {
                   onPageChange={setRunPage}
                   onSelectRun={(id, label, dets, hintsDets, motors, acquiring) => {
                     if (id === selectedRunId && acquiring) {
-                      fieldSelectorRef.current?.scheduleLive();
+                      // Same acquiring run — re-clicking it. If we already know it's a grid
+                      // scan, show the heatmap; otherwise trigger live 1D as before.
+                      if (isGridScan) { fieldSelectorRef.current?.scheduleGridPlot(id); setShowGrid1D(false); }
+                      else fieldSelectorRef.current?.scheduleLive();
                       return;
                     }
-                    // Only cancel a pending grid heatmap if the user explicitly
-                    // single-clicked a *different* run — not during the first
-                    // click of a double-click sequence on the same run.
-                    if (id !== selectedRunId) pendingGridHeatmapRef.current = false;
+                    if (id !== selectedRunId) {
+                      // Only cancel a pending grid heatmap if the user explicitly
+                      // single-clicked a *different* run — not during the first
+                      // click of a double-click sequence on the same run.
+                      pendingGridHeatmapRef.current = false;
+                      // For acquiring runs on a different scan, auto-show the grid heatmap
+                      // once metadata confirms it's a grid scan (no livePlot suppression).
+                      pendingAutoGridRef.current = acquiring;
+                    }
                     setSelectedRunId(id);
                     setSelectedRunLabel(label);
                     setSelectedRunDetectors(dets);
