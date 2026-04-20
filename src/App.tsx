@@ -509,6 +509,14 @@ export default function App() {
   const isGridScanRef = useRef(isGridScan);
   useEffect(() => { isGridScanRef.current = isGridScan; }, [isGridScan]);
 
+  // When both dichro fields are plotted together, assign xas to left axis and xmcd to right.
+  const dichroAxes = (traces: XYTrace[]): ('y1' | 'y2')[] => {
+    const labels = traces.map(t => t.yLabel);
+    if (labels.includes('dichro_xas') && labels.includes('dichro_xmcd'))
+      return traces.map(t => t.yLabel === 'dichro_xmcd' ? 'y2' : 'y1');
+    return [];
+  };
+
   const plot = useCallback((traces: XYTrace[], title: string) => {
     if (isGridScanRef.current) {
       // For grid scans "Plot" shows the heatmap, not a 1D trace
@@ -526,7 +534,7 @@ export default function App() {
     setFitResults(null);
     setShowDerivative(false);
     setShowWaterfall(false);
-    setTraceAxes([]);
+    setTraceAxes(dichroAxes(traces));
   }, [selectedRunId]);
 
   const livePlot = useCallback((traces: XYTrace[], title: string, stream: string, dataSubNode: string, dataNodeFamily: 'array' | 'table') => {
@@ -565,7 +573,7 @@ export default function App() {
     setFitResults(null);
     setShowDerivative(false);
     setShowWaterfall(false);
-    setTraceAxes([]);
+    setTraceAxes(dichroAxes(traces));
   }, [serverUrl, selectedCatalog, selectedRunId]);
 
   const stopLive = useCallback(() => {
