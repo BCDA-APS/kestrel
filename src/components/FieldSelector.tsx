@@ -363,10 +363,11 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     if (sortedFields.length === 0) return;
     const fieldNames = new Set(sortedFields.map(f => f.name));
 
-    // Dichro mode: when dichro_monitor is active, always default to dichro_positioner1 (X) + dichro_xmcd (Y)
+    // Dichro mode: when dichro_monitor is active, always default to dichro_positioner1 (X) + dichro_xas/xmcd (Y)
     if (dichroMode && selectedStream === 'dichro_monitor' && fieldNames.has('dichro_xmcd')) {
       if (fieldNames.has('dichro_positioner1')) setXField('dichro_positioner1');
-      setYFields(['dichro_xmcd']);
+      const yDichro = (['dichro_xas', 'dichro_xmcd'] as const).filter(f => fieldNames.has(f));
+      setYFields(yDichro);
       return;
     }
 
