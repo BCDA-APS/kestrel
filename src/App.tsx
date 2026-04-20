@@ -289,11 +289,15 @@ export default function App() {
           setFitResults(null);
         }
         if (pendingGridHeatmapRef.current) {
-          pendingGridHeatmapRef.current = false;
           if (isGrid) {
-            setShowGridHeatmap(true);
-            setShowGrid1D(false);
+            // Don't clear pendingGridHeatmapRef yet — livePlot stays suppressed until
+            // the grid is ready. scheduleGridPlot fires onGridPlot once FieldSelector
+            // has loaded the correct stream+fields, which then sets showGridHeatmap
+            // and clears the ref. This prevents opening GridScanPanel with empty
+            // stream/zField (which falls back to primary stream + eiger_image).
+            fieldSelectorRef.current?.scheduleGridPlot(selectedRunId);
           } else {
+            pendingGridHeatmapRef.current = false;
             fieldSelectorRef.current?.scheduleImageOpen();
           }
         }
@@ -519,9 +523,11 @@ export default function App() {
 
   const plot = useCallback((traces: XYTrace[], title: string) => {
     if (isGridScanRef.current) {
-      // For grid scans "Plot" shows the heatmap, not a 1D trace
-      setShowGridHeatmap(true);
-      setShowGrid1D(false);
+      // For grid scans "Plot" shows the heatmap, not a 1D trace.
+      // Defer via scheduleGridPlot so FieldSelector can supply the correct stream and
+      // Z field — calling setShowGridHeatmap(true) directly here leaves gridStream=''
+      // which causes GridScanPanel to fall back to the primary stream (eiger_image).
+      fieldSelectorRef.current?.scheduleGridPlot(selectedRunId);
       return;
     }
     setPanel(prev => ({
@@ -1219,7 +1225,7 @@ export default function App() {
                     setSelectedRunAcquiring(acquiring);
                     if (isSameRun) {
                       // useEffect won't fire (no id change) — decide immediately
-                      if (isGridScan) { setShowGridHeatmap(true); setShowGrid1D(false); }
+                      if (isGridScan) { fieldSelectorRef.current?.scheduleGridPlot(id); setShowGrid1D(false); }
                       else if (!acquiring) fieldSelectorRef.current?.scheduleImageOpen();
                     } else if (acquiring) {
                       // Acquiring: block livePlot until metadata determines grid vs 1D.
@@ -1273,7 +1279,7 @@ export default function App() {
                       onLivePlot={livePlot}
                       onRemoveRunTraces={removeRunTraces}
                       onZSelect={isGridScan ? setGridZField : undefined}
-                      onGridPlot={isGridScan ? (stream) => { setGridStream(stream); setShowGridHeatmap(true); setShowGrid1D(false); setCenterTab('graph'); } : undefined}
+                      onGridPlot={isGridScan ? (stream) => { pendingGridHeatmapRef.current = false; setGridStream(stream); setShowGridHeatmap(true); setShowGrid1D(false); setCenterTab('graph'); } : undefined}
                       onGrid1DPlot={isGridScan ? (stream) => { setGridStream(stream); setShowGrid1D(true); setShowGridHeatmap(false); setCenterTab('graph'); } : undefined}
                       onImageOpen={(fieldName, stream, dataSubNode, shape) => { setImageState({ fieldName, stream, dataSubNode, shape }); setPanel(null); setFitResults(null); setCenterTab('graph'); }}
                     />

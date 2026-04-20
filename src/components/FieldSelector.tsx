@@ -35,7 +35,7 @@ type FieldSelectorProps = {
   dichroMode?: boolean;
 };
 
-export type FieldSelectorHandle = { schedulePlot: () => void; scheduleLive: () => void; removeY: (yLabel: string) => void; scheduleImageOpen: () => void; schedulePlotOnLoad: (runId: string) => void };
+export type FieldSelectorHandle = { schedulePlot: () => void; scheduleLive: () => void; removeY: (yLabel: string) => void; scheduleImageOpen: () => void; schedulePlotOnLoad: (runId: string) => void; scheduleGridPlot: (runId: string) => void };
 
 const catSeg = (c: string | null) => c ? `/${c}` : '';
 
@@ -86,6 +86,8 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   const pendingImageOpenRef = useRef(false);
   // Set to a runId when schedulePlotOnLoad is called; fires handlePlot once fields load for that run
   const pendingPlotOnLoadRef = useRef<string | null>(null);
+  // Set to a runId when scheduleGridPlot is called; fires onGridPlot once zMode+fields are ready for that run
+  const [pendingGridPlot, setPendingGridPlot] = useState<string | null>(null);
   // Set to true when user explicitly deselects the image radio; prevents auto-reselect on run change
   const imageUserDismissed = useRef(false);
 
@@ -411,7 +413,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
       setYFields(firstDet ? [firstDet.name] : []);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortedFields, runMotors, runDetectors, runHintsDetectors, detectorDefault, runId, dichroMode, selectedStream]);
+  }, [sortedFields, runMotors, runDetectors, runHintsDetectors, detectorDefault, runId, dichroMode, selectedStream, zMode]);
 
   // In z-mode, emit the selected field whenever yFields[0] changes (auto-select or user click)
   useEffect(() => {
@@ -547,7 +549,13 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   // Fire plot/live once fields are ready; guard live against non-primary stream
   useEffect(() => {
     if (!loading && xField && yFields.length > 0) {
-      if (pendingAction) {
+      if (pendingGridPlot && pendingGridPlot === runId && zMode && onGridPlot) {
+        // Grid plot: fires after zMode=true so auto-select has picked the right field order.
+        // Emit the current Z field before opening so gridZField is set correctly.
+        onZSelect?.(yFields[0]);
+        setPendingGridPlot(null);
+        onGridPlot(selectedStream);
+      } else if (pendingAction) {
         const action = pendingAction;
         setPendingAction(null);
         pendingPlotOnLoadRef.current = null;
@@ -559,12 +567,13 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingAction, loading, xField, yFields, selectedStream]);
+  }, [pendingGridPlot, pendingAction, loading, xField, yFields, selectedStream, zMode]);
 
   useImperativeHandle(ref, () => ({
     schedulePlot: () => setPendingAction('plot'),
     scheduleLive: () => setPendingAction('live'),
     schedulePlotOnLoad: (id: string) => { pendingPlotOnLoadRef.current = id; },
+    scheduleGridPlot: (id: string) => { setPendingGridPlot(id); },
     removeY: (yLabel: string) => {
       setYFields(prev => {
         const next = prev.filter(y => y !== yLabel);
