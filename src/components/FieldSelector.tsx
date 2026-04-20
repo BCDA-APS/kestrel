@@ -35,7 +35,7 @@ type FieldSelectorProps = {
   dichroMode?: boolean;
 };
 
-export type FieldSelectorHandle = { schedulePlot: () => void; scheduleLive: () => void; removeY: (yLabel: string) => void; scheduleImageOpen: () => void };
+export type FieldSelectorHandle = { schedulePlot: () => void; scheduleLive: () => void; removeY: (yLabel: string) => void; scheduleImageOpen: () => void; schedulePlotOnLoad: (runId: string) => void };
 
 const catSeg = (c: string | null) => c ? `/${c}` : '';
 
@@ -84,6 +84,8 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   const autoSelectImagePending = useRef(false);
   // Set to true when scheduleImageOpen is called before fields have loaded
   const pendingImageOpenRef = useRef(false);
+  // Set to a runId when schedulePlotOnLoad is called; fires handlePlot once fields load for that run
+  const pendingPlotOnLoadRef = useRef<string | null>(null);
   // Set to true when user explicitly deselects the image radio; prevents auto-reselect on run change
   const imageUserDismissed = useRef(false);
 
@@ -544,11 +546,17 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
 
   // Fire plot/live once fields are ready; guard live against non-primary stream
   useEffect(() => {
-    if (pendingAction && !loading && xField && yFields.length > 0) {
-      const action = pendingAction;
-      setPendingAction(null);
-      if (action === 'live') handleLivePlot();
-      else handlePlot();
+    if (!loading && xField && yFields.length > 0) {
+      if (pendingAction) {
+        const action = pendingAction;
+        setPendingAction(null);
+        pendingPlotOnLoadRef.current = null;
+        if (action === 'live') handleLivePlot();
+        else handlePlot();
+      } else if (pendingPlotOnLoadRef.current === runId) {
+        pendingPlotOnLoadRef.current = null;
+        handlePlot();
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingAction, loading, xField, yFields, selectedStream]);
@@ -556,6 +564,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   useImperativeHandle(ref, () => ({
     schedulePlot: () => setPendingAction('plot'),
     scheduleLive: () => setPendingAction('live'),
+    schedulePlotOnLoad: (id: string) => { pendingPlotOnLoadRef.current = id; },
     removeY: (yLabel: string) => {
       setYFields(prev => {
         const next = prev.filter(y => y !== yLabel);

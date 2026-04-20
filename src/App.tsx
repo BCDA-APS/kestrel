@@ -1213,11 +1213,14 @@ export default function App() {
                       // useEffect won't fire (no id change) — decide immediately
                       if (isGridScan) { setShowGridHeatmap(true); setShowGrid1D(false); }
                       else if (!acquiring) fieldSelectorRef.current?.scheduleImageOpen();
-                    } else {
-                      // New run: metadata effect will decide after fetching dimensions.
-                      // Always set the flag so acquiring grid scans open the heatmap
-                      // instead of the auto-live 1D plot that FieldSelector would trigger.
+                    } else if (acquiring) {
+                      // Acquiring: block livePlot until metadata determines grid vs 1D.
                       pendingGridHeatmapRef.current = true;
+                    } else {
+                      // Completed scan: fire plot as soon as fields are ready, without
+                      // waiting for the metadata round-trip. The metadata effect runs in
+                      // parallel and will switch to grid view if it's a grid scan.
+                      fieldSelectorRef.current?.schedulePlotOnLoad(id);
                     }
                   }}
                   onShiftClickRun={handleShiftClickRun}
