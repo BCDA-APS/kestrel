@@ -530,6 +530,9 @@ export default function App() {
   }, [selectedRunId]);
 
   const livePlot = useCallback((traces: XYTrace[], title: string, stream: string, dataSubNode: string, dataNodeFamily: 'array' | 'table') => {
+    // If a grid heatmap is pending (double-click on acquiring grid scan), suppress
+    // the auto-live 1D plot — the heatmap will display once metadata loads.
+    if (pendingGridHeatmapRef.current) return;
     const existing = panelRef.current;
     if (autoAddRef.current && existing?.type === 'xy' && traces.length > 0) {
       const newX = traces[0].xLabel;
@@ -1206,15 +1209,15 @@ export default function App() {
                     setSelectedRunHintsDetectors(hintsDets);
                     setSelectedRunMotors(motors);
                     setSelectedRunAcquiring(acquiring);
-                    if (!acquiring) {
-                      if (isSameRun) {
-                        // useEffect won't fire (no id change) — decide immediately
-                        if (isGridScan) { setShowGridHeatmap(true); setShowGrid1D(false); }
-                        else fieldSelectorRef.current?.scheduleImageOpen();
-                      } else {
-                        // New run: metadata effect will decide after fetching
-                        pendingGridHeatmapRef.current = true;
-                      }
+                    if (isSameRun) {
+                      // useEffect won't fire (no id change) — decide immediately
+                      if (isGridScan) { setShowGridHeatmap(true); setShowGrid1D(false); }
+                      else if (!acquiring) fieldSelectorRef.current?.scheduleImageOpen();
+                    } else {
+                      // New run: metadata effect will decide after fetching dimensions.
+                      // Always set the flag so acquiring grid scans open the heatmap
+                      // instead of the auto-live 1D plot that FieldSelector would trigger.
+                      pendingGridHeatmapRef.current = true;
                     }
                   }}
                   onShiftClickRun={handleShiftClickRun}

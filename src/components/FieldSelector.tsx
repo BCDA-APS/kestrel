@@ -363,11 +363,14 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     if (sortedFields.length === 0) return;
     const fieldNames = new Set(sortedFields.map(f => f.name));
 
-    // Dichro mode: when dichro_monitor is active, always default to dichro_positioner1 (X) + dichro_xas/xmcd (Y)
+    // Dichro mode: when dichro_monitor is active, always default to dichro_positioner1 (X) + dichro fields (Y/Z)
+    // In z-mode (grid): xmcd first so it becomes the Z field; in 1D: xas first, both shown
     if (dichroMode && selectedStream === 'dichro_monitor' && fieldNames.has('dichro_xmcd')) {
       if (fieldNames.has('dichro_positioner1')) setXField('dichro_positioner1');
-      const yDichro = (['dichro_xas', 'dichro_xmcd'] as const).filter(f => fieldNames.has(f));
-      setYFields(yDichro);
+      const order = zMode
+        ? (['dichro_xmcd', 'dichro_xas'] as const)
+        : (['dichro_xas', 'dichro_xmcd'] as const);
+      setYFields(order.filter(f => fieldNames.has(f)));
       return;
     }
 
