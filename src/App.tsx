@@ -1264,6 +1264,8 @@ export default function App() {
                   onAutoFollowChange={setAutoFollow}
                   onNewAcquiringRun={(id, label, dets, hintsDets, motors, acquiring) => {
                     if (!autoFollow) return;
+                    pendingGridHeatmapRef.current = false;
+                    pendingAutoGridRef.current = true;
                     setSelectedRunId(id);
                     setSelectedRunLabel(label);
                     setSelectedRunDetectors(dets);
