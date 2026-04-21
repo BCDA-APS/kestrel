@@ -517,7 +517,10 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
 
   // When waiting for live and the target stream hasn't appeared yet, poll for it
   useEffect(() => {
-    const targetStream = lastManualStreamRef.current || 'primary';
+    // In dichro mode the auto-selected stream is dichro_monitor; use it as the target
+    // instead of falling back to primary (which is what lastManualStreamRef defaults to
+    // when the stream was auto-selected rather than manually chosen).
+    const targetStream = dichroMode ? 'dichro_monitor' : (lastManualStreamRef.current || 'primary');
     if (pendingAction !== 'live' || selectedStream === targetStream) return;
     const poll = () =>
       fetch(`${serverUrl}/api/v1/search${catSeg(catalog)}/${runId}?page[limit]=50`)
@@ -528,7 +531,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
           if (names.includes(targetStream)) { setStreams(names); setSelectedStream(targetStream); }
           else if (names.includes('primary')) {
             // Target stream not available on this run — fall back to primary and clear preference
-            lastManualStreamRef.current = '';
+            if (!dichroMode) lastManualStreamRef.current = '';
             setStreams(names); setSelectedStream('primary');
           }
         })
@@ -536,15 +539,16 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     const id = setInterval(poll, 2000);
     return () => clearInterval(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingAction, selectedStream, serverUrl, catalog, runId]);
+  }, [pendingAction, selectedStream, serverUrl, catalog, runId, dichroMode]);
 
   // Retry fetchFields every 2s while waiting for data to appear on the target stream
   useEffect(() => {
-    if (pendingAction !== 'live' || loading || fields.length > 0 || selectedStream !== (lastManualStreamRef.current || 'primary')) return;
+    const targetStream = dichroMode ? 'dichro_monitor' : (lastManualStreamRef.current || 'primary');
+    if (pendingAction !== 'live' || loading || fields.length > 0 || selectedStream !== targetStream) return;
     const id = setInterval(fetchFields, 2000);
     return () => clearInterval(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingAction, loading, fields.length, selectedStream]);
+  }, [pendingAction, loading, fields.length, selectedStream, dichroMode]);
 
   // Fire plot/live once fields are ready; guard live against non-primary stream
   useEffect(() => {
