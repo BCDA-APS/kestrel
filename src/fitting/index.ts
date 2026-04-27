@@ -315,5 +315,13 @@ export function fitData(modelName: string, xs: number[], ys: number[]): FitResul
     value: pFit[i],
   }));
 
+  // Append derived quantities for Top Hat
+  if (modelName === 'Top Hat') {
+    const a = pFit[1]; // left edge
+    const b = pFit[2]; // right edge
+    params.push({ name: 'center', label: 'Center', value: (a + b) / 2 });
+    params.push({ name: 'width',  label: 'Width',  value: Math.abs(b - a) });
+  }
+
   return { model: modelName, params, rSquared, xFit, yFit };
 }
