@@ -43,6 +43,30 @@ const _parseArrayFields = (json: any): string[] =>
 // Returns '/<catalog>' for named catalogs, '' for root (flat servers)
 const catSeg = (catalog: string | null) => catalog ? `/${catalog}` : '';
 
+// True when this tab is already a dedicated window — either a window.open popup
+// or a chrome-less window (Chrome --app, installed PWA). Hides the "pop out"
+// button in those cases since popping out again would only add chrome back.
+const isStandaloneWindow =
+  typeof window !== 'undefined' &&
+  (window.opener !== null ||
+   window.matchMedia('(display-mode: standalone)').matches);
+
+function openInPopup() {
+  const w = Math.min(1600, Math.floor(screen.availWidth * 0.9));
+  const h = Math.min(1000, Math.floor(screen.availHeight * 0.9));
+  window.open(window.location.href, 'kestrel-window', `popup=yes,width=${w},height=${h}`);
+}
+
+// Chrome --app=URL launches a fully chrome-less window (no address bar). The
+// command differs per OS; we show it in Settings so users can copy-paste.
+function buildDesktopAppCommand(): string {
+  const url = typeof window !== 'undefined' ? window.location.origin : '';
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+  if (ua.includes('Mac')) return `open -a "Google Chrome" --args --app=${url}`;
+  if (ua.includes('Windows')) return `start chrome --app=${url}`;
+  return `google-chrome --app=${url}`;
+}
+
 async function fetchRunTraces(
   serverUrl: string, catalog: string, runId: string, runLabel: string,
   detectors: string[], hintsDetectors: string[], motors: string[],
@@ -947,6 +971,16 @@ export default function App() {
             {qsConnectStatus === 'ok' && <span className="shrink-0 flex items-center gap-1.5 text-xs text-green-400"><span className="w-2 h-2 rounded-full bg-green-400" />Connected</span>}
             {qsConnectStatus === 'error' && <span className="shrink-0 flex items-center gap-1.5 text-xs text-red-400"><span className="w-2 h-2 rounded-full bg-red-400" />Failed</span>}
           </div>
+          {/* Pop-out window */}
+          {!isStandaloneWindow && (
+            <button onClick={openInPopup} title="Open in app window" className="shrink-0 p-2 rounded text-sky-400 hover:text-white hover:bg-sky-800 transition-colors">
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path d="M14 3h7v7" />
+                <path d="M10 14 21 3" />
+                <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" />
+              </svg>
+            </button>
+          )}
           {/* Settings gear */}
           <div className="relative flex-none" ref={settingsRef}>
             <button onClick={() => setShowSettings(v => !v)} title="Settings" className="p-2 rounded text-sky-400 hover:text-white hover:bg-sky-800 transition-colors">
@@ -988,6 +1022,12 @@ export default function App() {
                   <input type="checkbox" checked={settings.dichroMode !== false} onChange={e => updateSetting('dichroMode', e.target.checked)} className="accent-sky-500" />
                   <span className="text-white text-xs">Auto-select dichro_monitor + dichro_xmcd</span>
                 </label>
+                <p className="text-sky-400 text-[10px] font-medium uppercase tracking-wide mt-3 mb-1">Desktop app mode</p>
+                <p className="text-sky-300 text-xs mb-1.5">For a fully chrome-less window (no address bar), run this in your terminal. Requires Chrome or Edge.</p>
+                <div className="flex gap-1 items-center">
+                  <code className="flex-1 min-w-0 bg-sky-900 text-sky-200 text-[11px] px-2 py-1 rounded font-mono truncate" title={buildDesktopAppCommand()}>{buildDesktopAppCommand()}</code>
+                  <button onClick={() => navigator.clipboard?.writeText(buildDesktopAppCommand())} className="shrink-0 px-2 py-1 text-xs rounded bg-sky-700 hover:bg-sky-600 text-white">Copy</button>
+                </div>
               </div>
             )}
           </div>
@@ -1137,6 +1177,16 @@ export default function App() {
               {qsConnectStatus === 'error' && <span className="shrink-0 flex items-center gap-1.5 text-xs text-red-400"><span className="w-2 h-2 rounded-full bg-red-400" />Failed</span>}
             </div>
           )}
+          {/* Pop-out window */}
+          {!isStandaloneWindow && (
+            <button onClick={openInPopup} title="Open in app window" className="shrink-0 p-2 rounded text-sky-400 hover:text-white hover:bg-sky-800 transition-colors">
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path d="M14 3h7v7" />
+                <path d="M10 14 21 3" />
+                <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" />
+              </svg>
+            </button>
+          )}
           {/* Settings gear */}
           <div className="relative shrink-0" ref={settingsRef}>
             <button onClick={() => setShowSettings(v => !v)} title="Settings" className="p-2 rounded text-sky-400 hover:text-white hover:bg-sky-800 transition-colors">
@@ -1178,6 +1228,12 @@ export default function App() {
                   <input type="checkbox" checked={settings.dichroMode !== false} onChange={e => updateSetting('dichroMode', e.target.checked)} className="accent-sky-500" />
                   <span className="text-white text-xs">Auto-select dichro_monitor + dichro_xmcd</span>
                 </label>
+                <p className="text-sky-400 text-[10px] font-medium uppercase tracking-wide mt-3 mb-1">Desktop app mode</p>
+                <p className="text-sky-300 text-xs mb-1.5">For a fully chrome-less window (no address bar), run this in your terminal. Requires Chrome or Edge.</p>
+                <div className="flex gap-1 items-center">
+                  <code className="flex-1 min-w-0 bg-sky-900 text-sky-200 text-[11px] px-2 py-1 rounded font-mono truncate" title={buildDesktopAppCommand()}>{buildDesktopAppCommand()}</code>
+                  <button onClick={() => navigator.clipboard?.writeText(buildDesktopAppCommand())} className="shrink-0 px-2 py-1 text-xs rounded bg-sky-700 hover:bg-sky-600 text-white">Copy</button>
+                </div>
               </div>
             )}
           </div>
