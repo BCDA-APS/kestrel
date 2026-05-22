@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, forwardRef, useImperativeHandle } from 'react';
 import type { XYTrace } from '../types';
-import { matchesDev, matchesToken } from '../utils/fieldUtils';
+import { matchesDev, matchesToken, pickFastestChangingField } from '../utils/fieldUtils';
 
 type FieldInfo = {
   name: string;
@@ -60,6 +60,11 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   const [flashSuccess, setFlashSuccess] = useState(false);
   const lastXRef = useRef('');
   const lastXWasMotorRef = useRef(false);
+  // Tracks which runId set lastXRef. Used to scope motor X choices to the run
+  // they were made on — otherwise a manual pick of e.g. huber_euler_l on a
+  // k-varying hkl_scan would carry over to the next l-varying scan even when
+  // the auto-picker would do better.
+  const lastXRunIdRef = useRef('');
   const lastYRef = useRef<string[]>([]);
   const lastManualStreamRef = useRef('');
   // Tracks which runId the current `fields` were loaded for; prevents stale-fields auto-select
@@ -91,6 +96,8 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   const [pendingGridPlot, setPendingGridPlot] = useState<string | null>(null);
   // Set to true when user explicitly deselects the image radio; prevents auto-reselect on run change
   const imageUserDismissed = useRef(false);
+  // Cache "fastest-changing motor" pick per runId so re-selecting a run doesn't refetch.
+  const pickedXCache = useRef(new Map<string, string>());
 
   // Reset removedTracesRef when the run changes so it doesn't bleed into the next run
   useEffect(() => {
@@ -156,6 +163,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
           // auto-select effect already handles fields that don't exist here, so the detector is
           // remembered when the user returns to a run that does have the preferred stream.
           lastXRef.current = '';
+          lastXRunIdRef.current = '';
         }
         setSelectedStream(streamRestored ? preferred : nonBaseline.includes('primary') ? 'primary' : (nonBaseline[0] ?? ''));
       })
@@ -375,13 +383,83 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
       return;
     }
 
+    let xPickCancelled = false;
+    // Motor X choices are run-scoped (re-pick on every new run so multi-motor
+    // scans like hkl_scan don't get the wrong axis sticky across runs).
+    // Non-motor X choices (e.g. plotting against a detector for cross-run
+    // comparison) stay sticky as before.
+    const sameRunAsLastX = lastXRunIdRef.current === runId;
     if (lastXRef.current && fieldNames.has(lastXRef.current) &&
-        (!lastXWasMotorRef.current || matchesDev(lastXRef.current, runMotors))) {
+        (!lastXWasMotorRef.current || sameRunAsLastX)) {
       setXField(lastXRef.current);
     } else {
-      const firstMotor = sortedFields.find(f => f.name !== 'time' && matchesDev(f.name, runMotors))
-                      ?? sortedFields.find(f => f.name !== 'time' && matchesToken(f.name, runMotors));
-      setXField(firstMotor?.name ?? '');
+      // Build candidates one motor at a time, preferring the bare column over
+      // sub-signals like *_setpoint when both exist. Without this, hkl_scan can
+      // auto-pick huber_euler_k_setpoint over huber_euler_k because setpoint
+      // values span a slightly wider range than the measured readback.
+      const motorCandidates: FieldInfo[] = [];
+      const seen = new Set<string>();
+      for (const motor of runMotors) {
+        const exact = sortedFields.find(f => f.name === motor);
+        if (exact && !seen.has(exact.name)) {
+          motorCandidates.push(exact);
+          seen.add(exact.name);
+          continue;
+        }
+        for (const f of sortedFields) {
+          if (f.name !== 'time' && f.name.startsWith(motor + '_') && !seen.has(f.name)) {
+            motorCandidates.push(f);
+            seen.add(f.name);
+          }
+        }
+      }
+      if (motorCandidates.length >= 2) {
+        // Multi-motor scan (e.g. hkl_scan, inner_product): pick the motor whose
+        // recorded values change the most over the run. Leaves X empty until
+        // the small fetch completes (~100ms); the plot-trigger effect waits on xField.
+        const cached = pickedXCache.current.get(runId);
+        if (cached && fieldNames.has(cached)) {
+          setXField(cached);
+        } else {
+          setXField('');
+          const fetchMotorValues = async (names: string[]): Promise<Record<string, number[]>> => {
+            const subPath = dataSubNode ? `/${dataSubNode}` : '';
+            if (dataNodeFamily === 'table') {
+              const colParams = names.map(n => `column=${encodeURIComponent(n)}`).join('&');
+              const url = `${serverUrl}/api/v1/table/full${catSeg(catalog)}/${runId}/${selectedStream}${subPath}?format=application/json&${colParams}`;
+              const r = await fetch(url);
+              if (!r.ok) throw new Error('fetch failed');
+              return await r.json() as Record<string, number[]>;
+            }
+            const fieldNodeMap = new Map(fields.map(f => {
+              const node = f.subNode !== undefined ? f.subNode : dataSubNode;
+              const sp = node ? `/${node}` : '';
+              return [f.name, `${serverUrl}/api/v1/array/full${catSeg(catalog)}/${runId}/${selectedStream}${sp}`];
+            }));
+            const baseDefault = `${serverUrl}/api/v1/array/full${catSeg(catalog)}/${runId}/${selectedStream}${subPath}`;
+            const baseFor = (name: string) => fieldNodeMap.get(name) ?? baseDefault;
+            const results = await Promise.all(names.map(async (name) => {
+              const r = await fetch(`${baseFor(name)}/${name}?format=application/json`);
+              return r.ok ? (await r.json() as number[]) : null;
+            }));
+            const data: Record<string, number[]> = {};
+            names.forEach((name, i) => { if (results[i]) data[name] = results[i]!; });
+            return data;
+          };
+          pickFastestChangingField(motorCandidates.map(f => f.name), fetchMotorValues).then(winner => {
+            if (xPickCancelled) return;
+            pickedXCache.current.set(runId, winner);
+            setXField(winner);
+          }).catch(() => {
+            if (!xPickCancelled) setXField(motorCandidates[0].name);
+          });
+        }
+      } else if (motorCandidates.length === 1) {
+        setXField(motorCandidates[0].name);
+      } else {
+        const tokenMatch = sortedFields.find(f => f.name !== 'time' && matchesToken(f.name, runMotors));
+        setXField(tokenMatch?.name ?? '');
+      }
     }
 
     const validLastY = lastYRef.current.filter(y => fieldNames.has(y));
@@ -410,6 +488,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
         sortedFields.find(f => matchesDev(f.name, runDetectors));
       setYFields(firstDet ? [firstDet.name] : []);
     }
+    return () => { xPickCancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortedFields, runMotors, runDetectors, runHintsDetectors, detectorDefault, runId, dichroMode, selectedStream, zMode]);
 
@@ -422,6 +501,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   const selectXField = (name: string) => {
     lastXRef.current = name;
     lastXWasMotorRef.current = matchesDev(name, runMotors);
+    lastXRunIdRef.current = runId;
     setXField(name);
     if (onAddTraces) handlePlot(name, yFields);
   };

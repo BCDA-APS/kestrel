@@ -31,6 +31,37 @@ export function matchesToken(fieldName: string, devNames: string[]): boolean {
   return devNames.some(d => tokens.includes(d));
 }
 
+/**
+ * Given several motor columns that the metadata says were scanned (e.g. h/k/l
+ * for an hkl_scan), return the one whose recorded values change the most over
+ * the run. Used to default the X axis to the dominant axis instead of always
+ * picking the first one alphabetically.
+ *
+ * fetchValues is injected so this stays pure and testable: it should resolve to
+ * a map { fieldName: array of values } for the requested candidates.
+ *
+ * Falls back to candidates[0] if a candidate has no/insufficient data. Returns
+ * '' if candidates is empty; returns the single candidate if there is just one.
+ */
+export async function pickFastestChangingField(
+  candidates: string[],
+  fetchValues: (names: string[]) => Promise<Record<string, number[]>>,
+): Promise<string> {
+  if (candidates.length === 0) return '';
+  if (candidates.length === 1) return candidates[0];
+
+  const data = await fetchValues(candidates);
+  let bestName = candidates[0];
+  let bestRange = -1;
+  for (const name of candidates) {
+    const arr = data[name];
+    if (!arr || arr.length < 2) continue;
+    const range = Math.abs(Number(arr[arr.length - 1]) - Number(arr[0]));
+    if (range > bestRange) { bestRange = range; bestName = name; }
+  }
+  return bestName;
+}
+
 
 /**
  * Sort fields into display order: time → motors → other → detectors.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isImageField, matchesDev, matchesToken, sortFields, type FieldInfo } from './fieldUtils';
+import { isImageField, matchesDev, matchesToken, pickFastestChangingField, sortFields, type FieldInfo } from './fieldUtils';
 
 const f = (name: string, shape: number[], dtype = 'float64'): FieldInfo => ({ name, shape, dtype });
 
@@ -70,6 +70,63 @@ describe('matchesToken', () => {
 
   it('returns true if any device name matches', () => {
     expect(matchesToken('huber_euler_extras_psi', ['theta', 'psi'])).toBe(true);
+  });
+});
+
+describe('pickFastestChangingField', () => {
+  it('returns empty string for no candidates', async () => {
+    const fetcher = async () => ({});
+    expect(await pickFastestChangingField([], fetcher)).toBe('');
+  });
+
+  it('returns the only candidate without fetching', async () => {
+    let called = false;
+    const fetcher = async () => { called = true; return {}; };
+    expect(await pickFastestChangingField(['h'], fetcher)).toBe('h');
+    expect(called).toBe(false);
+  });
+
+  it('picks the candidate with the largest |last - first|', async () => {
+    const fetcher = async () => ({
+      huber_euler_h: [1, 1, 1, 1, 1],
+      huber_euler_k: [0, 0.1, 0.2, 0.3, 0.4],
+      huber_euler_l: [1, 1.5, 2, 2.5, 3],
+    });
+    const winner = await pickFastestChangingField(
+      ['huber_euler_h', 'huber_euler_k', 'huber_euler_l'],
+      fetcher,
+    );
+    expect(winner).toBe('huber_euler_l');
+  });
+
+  it('uses absolute value (negative-going axes count)', async () => {
+    const fetcher = async () => ({
+      h: [0, 0.1, 0.2],
+      l: [5, 0, -5],
+    });
+    expect(await pickFastestChangingField(['h', 'l'], fetcher)).toBe('l');
+  });
+
+  it('returns the first candidate on ties', async () => {
+    const fetcher = async () => ({
+      h: [0, 1, 2],
+      k: [0, 1, 2],
+    });
+    expect(await pickFastestChangingField(['h', 'k'], fetcher)).toBe('h');
+  });
+
+  it('skips candidates with missing or too-short data', async () => {
+    const fetcher = async () => ({
+      h: [],
+      k: [0],
+      l: [0, 0.5, 1],
+    });
+    expect(await pickFastestChangingField(['h', 'k', 'l'], fetcher)).toBe('l');
+  });
+
+  it('falls back to first candidate when no candidate has usable data', async () => {
+    const fetcher = async () => ({ h: [], k: undefined as unknown as number[] });
+    expect(await pickFastestChangingField(['h', 'k'], fetcher)).toBe('h');
   });
 });
 
