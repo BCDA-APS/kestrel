@@ -237,13 +237,18 @@ export default function RunSummaryTab({ serverUrl, catalog, runId, runAcquiring 
   const stop = meta?.stop ?? null;
   const scanId = start.scan_id;
   const planName = start.plan_name ?? '—';
-  const detectors: string[] = Array.isArray(start.detectors) ? start.detectors : [];
+  const detectorList: string[] = Array.isArray(start.detectors) ? start.detectors : [];
+  const hintsDetectorList: string[] = Array.isArray(start.hints?.detectors) ? start.hints.detectors : [];
+  const detectors: string[] = detectorList.length > 0 ? detectorList : hintsDetectorList;
+  // psi_scan / other polartools plans don't write start.motors; the scanned
+  // axis lives as a key of start.axes (e.g. { psi: { start: -1, finish: 1 } }).
   const motors: string[] = Array.isArray(start.motors)
     ? start.motors
-    : Array.isArray(start.positioners) ? start.positioners : [];
+    : Array.isArray(start.positioners) ? start.positioners
+    : (start.axes && typeof start.axes === 'object' ? Object.keys(start.axes) : []);
   const startTime = start.time ? new Date(start.time * 1000).toLocaleString() : '—';
   const exitStatus = stop?.exit_status ?? (stop === null ? 'running' : '—');
-  const numPoints = start.num_points;
+  const numPoints = start.num_points ?? start.num;
 
   const rowCls = 'flex items-baseline gap-4 py-1 border-b border-gray-100 last:border-0';
   const labelCls = 'w-32 shrink-0 text-xs font-semibold text-gray-400 uppercase tracking-wide';

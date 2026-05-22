@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, forwardRef, useImperativeHandle } from 'react';
 import type { XYTrace } from '../types';
+import { matchesDev, matchesToken } from '../utils/fieldUtils';
 
 type FieldInfo = {
   name: string;
@@ -344,10 +345,6 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     prevLoadingRef.current = loading;
   }, [loading, fields.length]);
 
-  // Prefix-aware classification: device names like "tetramm1" match fields "tetramm1_current1_..."
-  const matchesDev = (fieldName: string, devNames: string[]) =>
-    devNames.some(d => fieldName === d || fieldName.startsWith(d + '_'));
-
 // Sort fields: time → motors → area detectors → other, each group alphabetical
   const sortedFields = useMemo(() => {
     const alpha = (a: FieldInfo, b: FieldInfo) => a.name.localeCompare(b.name);
@@ -382,7 +379,8 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
         (!lastXWasMotorRef.current || matchesDev(lastXRef.current, runMotors))) {
       setXField(lastXRef.current);
     } else {
-      const firstMotor = sortedFields.find(f => f.name !== 'time' && matchesDev(f.name, runMotors));
+      const firstMotor = sortedFields.find(f => f.name !== 'time' && matchesDev(f.name, runMotors))
+                      ?? sortedFields.find(f => f.name !== 'time' && matchesToken(f.name, runMotors));
       setXField(firstMotor?.name ?? '');
     }
 

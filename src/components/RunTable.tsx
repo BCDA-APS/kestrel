@@ -55,9 +55,14 @@ function parseRun(item: Record<string, unknown>): RunRow {
   const stop  = attrs.metadata?.stop;
   const detectorList: string[] = Array.isArray(start.detectors) ? start.detectors : [];
   const hintsDetectorList: string[] = Array.isArray(start.hints?.detectors) ? start.hints.detectors : [];
+  // psi_scan / other polartools plans don't write start.motors; the scanned
+  // axis lives as a key of start.axes (e.g. { psi: { start: -1, finish: 1 } }).
   const motorList: string[] = Array.isArray(start.motors)
     ? start.motors
-    : Array.isArray(start.positioners) ? start.positioners : [];
+    : Array.isArray(start.positioners) ? start.positioners
+    : (start.axes && typeof start.axes === 'object' ? Object.keys(start.axes) : []);
+  // Same plans also leave start.detectors empty but populate start.hints.detectors.
+  const displayDetectors = detectorList.length > 0 ? detectorList : hintsDetectorList;
   const date = start.time
     ? new Date(start.time * 1000).toLocaleString()
     : undefined;
@@ -65,9 +70,9 @@ function parseRun(item: Record<string, unknown>): RunRow {
     id:           String(item.id ?? ''),
     scanId:       start.scan_id,
     planName:     start.plan_name,
-    detectors:    detectorList.join(', ') || undefined,
+    detectors:    displayDetectors.join(', ') || undefined,
     positioners:  motorList.join(', ') || undefined,
-    numPoints:    start.num_points,
+    numPoints:    start.num_points ?? start.num,
     detectorList,
     hintsDetectorList,
     motorList,

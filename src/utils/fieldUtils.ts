@@ -19,6 +19,18 @@ export function matchesDev(fieldName: string, devNames: string[]): boolean {
   return devNames.some(d => fieldName === d || fieldName.startsWith(d + '_'));
 }
 
+/**
+ * Token-aware fallback for matchesDev. Splits fieldName on underscores and
+ * returns true if any device name is one of the tokens. Used when the metadata
+ * records a short logical axis name (e.g. "psi" for psi_scan) but the recorded
+ * column is namespaced under its device ("huber_euler_extras_psi"). Should be
+ * tried only after matchesDev fails, since it is broader.
+ */
+export function matchesToken(fieldName: string, devNames: string[]): boolean {
+  const tokens = fieldName.split('_');
+  return devNames.some(d => tokens.includes(d));
+}
+
 
 /**
  * Sort fields into display order: time → motors → other → detectors.

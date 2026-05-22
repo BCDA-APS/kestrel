@@ -12,6 +12,7 @@ import GridScan1DPanel from './components/GridScan1DPanel';
 import ImagePanel from './components/ImagePanel';
 import type { Panel, XYTrace, TraceStyle } from './types';
 import { DEFAULT_TRACE_STYLE } from './constants';
+import { matchesDev, matchesToken } from './utils/fieldUtils';
 import { fitData, MODEL_NAMES } from './fitting';
 import type { FitResult } from './fitting';
 
@@ -72,7 +73,6 @@ async function fetchRunTraces(
   detectors: string[], hintsDetectors: string[], motors: string[],
   preferX: string, preferYs: string[],
 ): Promise<XYTrace[]> {
-  const matchesDev = (name: string, devs: string[]) => devs.some(d => name === d || name.startsWith(d + '_'));
   const cs = catSeg(catalog);
 
   // 1. Streams
@@ -110,6 +110,7 @@ async function fetchRunTraces(
   // 3. Resolve X/Y — prefer matching fields, fall back progressively to any available field
   const x = fieldSet.has(preferX) ? preferX
     : (fieldNames.find(f => f !== 'time' && matchesDev(f, motors))
+      ?? fieldNames.find(f => f !== 'time' && matchesToken(f, motors))
       ?? fieldNames.find(f => f !== 'time')
       ?? fieldNames[0]
       ?? '');

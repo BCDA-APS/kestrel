@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isImageField, matchesDev, sortFields, type FieldInfo } from './fieldUtils';
+import { isImageField, matchesDev, matchesToken, sortFields, type FieldInfo } from './fieldUtils';
 
 const f = (name: string, shape: number[], dtype = 'float64'): FieldInfo => ({ name, shape, dtype });
 
@@ -44,6 +44,32 @@ describe('matchesDev', () => {
 
   it('returns false when no device matches', () => {
     expect(matchesDev('motor1', ['det1', 'det2'])).toBe(false);
+  });
+});
+
+describe('matchesToken', () => {
+  it('matches device name as the last token (psi_scan pseudo-axis case)', () => {
+    expect(matchesToken('huber_euler_extras_psi', ['psi'])).toBe(true);
+  });
+
+  it('matches device name as a middle token', () => {
+    expect(matchesToken('scaler1_psi_offset', ['psi'])).toBe(true);
+  });
+
+  it('matches device name as the first token', () => {
+    expect(matchesToken('psi_value', ['psi'])).toBe(true);
+  });
+
+  it('does not match substring within a single token', () => {
+    expect(matchesToken('parsipal', ['psi'])).toBe(false);
+  });
+
+  it('returns false when no token matches', () => {
+    expect(matchesToken('huber_euler_mu', ['psi'])).toBe(false);
+  });
+
+  it('returns true if any device name matches', () => {
+    expect(matchesToken('huber_euler_extras_psi', ['theta', 'psi'])).toBe(true);
   });
 });
 
