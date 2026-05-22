@@ -58,14 +58,26 @@ function openInPopup() {
   window.open(window.location.href, 'kestrel-window', `popup=yes,width=${w},height=${h}`);
 }
 
-// Chrome --app=URL launches a fully chrome-less window (no address bar). The
-// command differs per OS; we show it in Settings so users can copy-paste.
+// Chrome/Edge --app=URL launches a fully chrome-less window (no address bar).
+// The command differs per OS and per browser (Edge ships the same Chromium
+// --app flag under a different binary name). On Linux we use `setsid -f` so
+// closing the launching terminal doesn't take the app window with it (systemd-
+// logind kills the terminal's process scope otherwise) and silence stderr to
+// drop Chrome's noisy GPU/dbus/GCM startup chatter on locked-down machines.
 function buildDesktopAppCommand(): string {
   const url = typeof window !== 'undefined' ? window.location.origin : '';
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
-  if (ua.includes('Mac')) return `open -a "Google Chrome" --args --app=${url}`;
-  if (ua.includes('Windows')) return `start chrome --app=${url}`;
-  return `google-chrome --app=${url}`;
+  const isEdge = ua.includes('Edg/');
+  if (ua.includes('Mac')) {
+    const app = isEdge ? 'Microsoft Edge' : 'Google Chrome';
+    return `open -a "${app}" --args --app=${url}`;
+  }
+  if (ua.includes('Windows')) {
+    const bin = isEdge ? 'msedge' : 'chrome';
+    return `start ${bin} --app=${url}`;
+  }
+  const bin = isEdge ? 'microsoft-edge' : 'google-chrome';
+  return `setsid -f ${bin} --app=${url} >/dev/null 2>&1`;
 }
 
 async function fetchRunTraces(
