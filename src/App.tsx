@@ -80,6 +80,24 @@ function buildDesktopAppCommand(): string {
   return `setsid -f ${bin} --app=${url} >/dev/null 2>&1`;
 }
 
+// navigator.clipboard is only defined on HTTPS / localhost. On plain-HTTP
+// deploys (e.g. the podman build served from nefarian:4173) it is undefined,
+// so we fall back to the deprecated-but-still-supported execCommand path.
+function copyToClipboard(text: string): void {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text);
+    return;
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+}
+
 async function fetchRunTraces(
   serverUrl: string, catalog: string, runId: string, runLabel: string,
   detectors: string[], hintsDetectors: string[], motors: string[],
@@ -1039,7 +1057,7 @@ export default function App() {
                 <p className="text-sky-300 text-xs mb-1.5">For a fully chrome-less window (no address bar), run this in your terminal. Requires Chrome or Edge.</p>
                 <div className="flex gap-1 items-center">
                   <code className="flex-1 min-w-0 bg-sky-900 text-sky-200 text-[11px] px-2 py-1 rounded font-mono truncate" title={buildDesktopAppCommand()}>{buildDesktopAppCommand()}</code>
-                  <button onClick={() => navigator.clipboard?.writeText(buildDesktopAppCommand())} className="shrink-0 px-2 py-1 text-xs rounded bg-sky-700 hover:bg-sky-600 text-white">Copy</button>
+                  <button onClick={() => copyToClipboard(buildDesktopAppCommand())} className="shrink-0 px-2 py-1 text-xs rounded bg-sky-700 hover:bg-sky-600 text-white">Copy</button>
                 </div>
               </div>
             )}
@@ -1245,7 +1263,7 @@ export default function App() {
                 <p className="text-sky-300 text-xs mb-1.5">For a fully chrome-less window (no address bar), run this in your terminal. Requires Chrome or Edge.</p>
                 <div className="flex gap-1 items-center">
                   <code className="flex-1 min-w-0 bg-sky-900 text-sky-200 text-[11px] px-2 py-1 rounded font-mono truncate" title={buildDesktopAppCommand()}>{buildDesktopAppCommand()}</code>
-                  <button onClick={() => navigator.clipboard?.writeText(buildDesktopAppCommand())} className="shrink-0 px-2 py-1 text-xs rounded bg-sky-700 hover:bg-sky-600 text-white">Copy</button>
+                  <button onClick={() => copyToClipboard(buildDesktopAppCommand())} className="shrink-0 px-2 py-1 text-xs rounded bg-sky-700 hover:bg-sky-600 text-white">Copy</button>
                 </div>
               </div>
             )}
