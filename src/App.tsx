@@ -64,20 +64,31 @@ function openInPopup() {
 // closing the launching terminal doesn't take the app window with it (systemd-
 // logind kills the terminal's process scope otherwise) and silence stderr to
 // drop Chrome's noisy GPU/dbus/GCM startup chatter on locked-down machines.
+//
+// --no-first-run and --no-default-browser-check suppress the welcome /
+// "make me default" UI on a fresh profile. They only affect the launch they
+// are passed to: opening Chrome the normal way later still shows onboarding
+// once, which is the desired behavior — we just don't want our app launcher
+// to be the thing that surfaces it.
+const KIOSK_FLAGS = '--no-first-run --no-default-browser-check';
 function buildDesktopAppCommand(): string {
   const url = typeof window !== 'undefined' ? window.location.origin : '';
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
   const isEdge = ua.includes('Edg/');
   if (ua.includes('Mac')) {
+    // -n forces a new instance so --args are honored even when Chrome/Edge
+    // is already running. Without -n, `open -a` just focuses the running
+    // app and drops --app=URL on the floor. The "duplicate dock icon" cost
+    // is mild; the profile/cookies are still shared.
     const app = isEdge ? 'Microsoft Edge' : 'Google Chrome';
-    return `open -a "${app}" --args --app=${url}`;
+    return `open -na "${app}" --args --app=${url} ${KIOSK_FLAGS}`;
   }
   if (ua.includes('Windows')) {
     const bin = isEdge ? 'msedge' : 'chrome';
-    return `start ${bin} --app=${url}`;
+    return `start ${bin} --app=${url} ${KIOSK_FLAGS}`;
   }
   const bin = isEdge ? 'microsoft-edge' : 'google-chrome';
-  return `setsid -f ${bin} --app=${url} >/dev/null 2>&1`;
+  return `setsid -f ${bin} --app=${url} ${KIOSK_FLAGS} >/dev/null 2>&1`;
 }
 
 // navigator.clipboard is only defined on HTTPS / localhost. On plain-HTTP
