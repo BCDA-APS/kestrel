@@ -684,6 +684,21 @@ export default function App() {
     });
   }, []);
 
+  // Preserve each signal's axis when adding another run with the same fields.
+  const addTracesMatchingAxes = useCallback((traces: XYTrace[]) => {
+    const existing = panelRef.current;
+    if (!existing || existing.type !== 'xy') return;
+    const existingKeys = new Set(existing.traces.map(t => `${t.runId}|${t.xLabel}|${t.yLabel}`));
+    const newTraces = traces.filter(t => !existingKeys.has(`${t.runId}|${t.xLabel}|${t.yLabel}`));
+    if (newTraces.length === 0) return;
+    const axisByLabel = new Map(existing.traces.map((t, i) => [t.yLabel, traceAxes[i] ?? 'y1']));
+    addTraces(newTraces);
+    setTraceAxes(prev => [
+      ...prev,
+      ...newTraces.map((t, i) => axisByLabel.get(t.yLabel) ?? (i === 1 ? 'y2' : 'y1')),
+    ]);
+  }, [addTraces, traceAxes]);
+
   const addTracesRight = useCallback((traces: XYTrace[]) => {
     const existing = panelRef.current;
     if (!existing || existing.type !== 'xy') return;
@@ -709,7 +724,7 @@ export default function App() {
     try {
       const traces = await fetchRunTraces(serverUrl, selectedCatalog ?? '', runId, label, detectors, hintsDetectors, motors, preferX, preferYs, settings.dichroMode !== false);
       if (hasGraph) {
-        addTraces(traces);
+        addTracesMatchingAxes(traces);
       } else {
         plot(traces, label || runId.slice(0, 7));
       }
@@ -720,7 +735,7 @@ export default function App() {
     } finally {
       setAddRunId(null);
     }
-  }, [serverUrl, selectedCatalog, settings.dichroMode, addTraces, plot]);
+  }, [serverUrl, selectedCatalog, settings.dichroMode, addTracesMatchingAxes, plot]);
 
   const handleAltClickRun = useCallback(async (runId: string, label: string, detectors: string[], hintsDetectors: string[], motors: string[]) => {
     const currentPanel = panelRef.current;
