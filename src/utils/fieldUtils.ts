@@ -37,6 +37,11 @@ export function selectPlotStream(streams: string[], dichroMode: boolean): string
   return streams.includes('primary') ? 'primary' : (streams[0] ?? '');
 }
 
+/** Assign the first two selected signals to separate plot axes. */
+export function assignTraceAxes(traceCount: number): ('y1' | 'y2')[] {
+  return Array.from({ length: traceCount }, (_, i) => i === 1 ? 'y2' : 'y1');
+}
+
 /**
  * Given several motor columns that the metadata says were scanned (e.g. h/k/l
  * for an hkl_scan), return the one whose recorded values change the most over

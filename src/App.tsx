@@ -12,7 +12,7 @@ import GridScan1DPanel from './components/GridScan1DPanel';
 import ImagePanel from './components/ImagePanel';
 import type { Panel, XYTrace, TraceStyle } from './types';
 import { DEFAULT_TRACE_STYLE } from './constants';
-import { matchesDev, matchesToken, selectPlotStream } from './utils/fieldUtils';
+import { assignTraceAxes, matchesDev, matchesToken, selectPlotStream } from './utils/fieldUtils';
 import { fitData, MODEL_NAMES } from './fitting';
 import type { FitResult } from './fitting';
 
@@ -591,13 +591,8 @@ export default function App() {
   const isGridScanRef = useRef(isGridScan);
   useEffect(() => { isGridScanRef.current = isGridScan; }, [isGridScan]);
 
-  // When both dichro fields are plotted together, assign xas to left axis and xmcd to right.
-  const dichroAxes = (traces: XYTrace[]): ('y1' | 'y2')[] => {
-    const labels = traces.map(t => t.yLabel);
-    if (labels.includes('dichro_xas') && labels.includes('dichro_xmcd'))
-      return traces.map(t => t.yLabel === 'dichro_xmcd' ? 'y2' : 'y1');
-    return [];
-  };
+  // Keep the first two selected signals on separate axes for different magnitudes.
+  const initialTraceAxes = (traces: XYTrace[]): ('y1' | 'y2')[] => assignTraceAxes(traces.length);
 
   const plot = useCallback((traces: XYTrace[], title: string) => {
     if (isGridScanRef.current) {
@@ -618,7 +613,7 @@ export default function App() {
     setFitResults(null);
     setShowDerivative(false);
     setShowWaterfall(false);
-    setTraceAxes(dichroAxes(traces));
+    setTraceAxes(initialTraceAxes(traces));
   }, [selectedRunId]);
 
   const livePlot = useCallback((traces: XYTrace[], title: string, stream: string, dataSubNode: string, dataNodeFamily: 'array' | 'table') => {
@@ -657,7 +652,7 @@ export default function App() {
     setFitResults(null);
     setShowDerivative(false);
     setShowWaterfall(false);
-    setTraceAxes(dichroAxes(traces));
+    setTraceAxes(initialTraceAxes(traces));
   }, [serverUrl, selectedCatalog, selectedRunId]);
 
   const stopLive = useCallback(() => {

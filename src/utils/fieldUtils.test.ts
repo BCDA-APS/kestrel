@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isImageField, matchesDev, matchesToken, pickFastestChangingField, selectPlotStream, sortFields, type FieldInfo } from './fieldUtils';
+import { assignTraceAxes, isImageField, matchesDev, matchesToken, pickFastestChangingField, selectPlotStream, sortFields, type FieldInfo } from './fieldUtils';
 
 const f = (name: string, shape: number[], dtype = 'float64'): FieldInfo => ({ name, shape, dtype });
 
@@ -88,6 +88,20 @@ describe('selectPlotStream', () => {
 
   it('uses the first stream when primary is unavailable', () => {
     expect(selectPlotStream(['baseline'], false)).toBe('baseline');
+  });
+});
+
+describe('assignTraceAxes', () => {
+  it('places the first signal on the left and the second on the right', () => {
+    expect(assignTraceAxes(2)).toEqual(['y1', 'y2']);
+  });
+
+  it('keeps additional signals on the left axis', () => {
+    expect(assignTraceAxes(4)).toEqual(['y1', 'y2', 'y1', 'y1']);
+  });
+
+  it('returns no axes when there are no signals', () => {
+    expect(assignTraceAxes(0)).toEqual([]);
   });
 });
 
