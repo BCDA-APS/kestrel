@@ -31,6 +31,12 @@ export function matchesToken(fieldName: string, devNames: string[]): boolean {
   return devNames.some(d => tokens.includes(d));
 }
 
+/** Select the stream used for automatic plot additions. */
+export function selectPlotStream(streams: string[], dichroMode: boolean): string {
+  if (dichroMode && streams.includes('dichro_monitor')) return 'dichro_monitor';
+  return streams.includes('primary') ? 'primary' : (streams[0] ?? '');
+}
+
 /**
  * Given several motor columns that the metadata says were scanned (e.g. h/k/l
  * for an hkl_scan), return the one whose recorded values change the most over

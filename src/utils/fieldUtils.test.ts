@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isImageField, matchesDev, matchesToken, pickFastestChangingField, sortFields, type FieldInfo } from './fieldUtils';
+import { isImageField, matchesDev, matchesToken, pickFastestChangingField, selectPlotStream, sortFields, type FieldInfo } from './fieldUtils';
 
 const f = (name: string, shape: number[], dtype = 'float64'): FieldInfo => ({ name, shape, dtype });
 
@@ -70,6 +70,24 @@ describe('matchesToken', () => {
 
   it('returns true if any device name matches', () => {
     expect(matchesToken('huber_euler_extras_psi', ['theta', 'psi'])).toBe(true);
+  });
+});
+
+describe('selectPlotStream', () => {
+  it('prefers dichro_monitor in dichro mode', () => {
+    expect(selectPlotStream(['primary', 'dichro_monitor'], true)).toBe('dichro_monitor');
+  });
+
+  it('falls back to primary outside dichro mode', () => {
+    expect(selectPlotStream(['primary', 'dichro_monitor'], false)).toBe('primary');
+  });
+
+  it('falls back to primary when dichro_monitor is unavailable', () => {
+    expect(selectPlotStream(['primary'], true)).toBe('primary');
+  });
+
+  it('uses the first stream when primary is unavailable', () => {
+    expect(selectPlotStream(['baseline'], false)).toBe('baseline');
   });
 });
 
