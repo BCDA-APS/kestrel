@@ -20,15 +20,12 @@ BCDA, Advanced Photon Source, Argonne National Laboratory
 
 ## Quick Start
 
-```bash
-conda create -n kestrel nodejs
-conda activate kestrel
-git clone https://github.com/BCDA-APS/kestrel.git
-cd kestrel
-npm install
-npm run dev
+Open Kestrel at:
+
+```
+http://nefarian.xray.aps.anl.gov:4173
 ```
 
-Then open `http://localhost:5173`, enter your Tiled server URL, and connect.
+Enter your Tiled server URL, click **Connect**, and select a catalog.
 
-See [Installation](installation.md) for full details.
+See [Getting Started](usage/getting-started.md) for a walkthrough.

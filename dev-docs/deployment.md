@@ -1,6 +1,6 @@
 # Deployment
 
-> **Summary:** The web app runs inside a container on a workstation called **nefarian**, which anyone on the network can reach at `http://nefarian.xray.aps.anl.gov:4173`. The container bundles the React frontend and a small Node server that acts as a middleman — it forwards browser requests to Tiled and QServer so the browser doesn't have to talk to those directly. The container is managed as a system service that starts automatically on boot and restarts if it crashes. To deploy an update: pull the latest code, rebuild the app and container, then restart the service.
+> **Summary:** The web app runs inside a container on a workstation called **nefarian**, which anyone on the network can reach at `http://nefarian.xray.aps.anl.gov:4173`. The container bundles the React frontend and a small Node server that acts as a middleman — it forwards browser requests to Tiled and QServer so the browser doesn't have to talk to those directly (browsers block a page from calling out to other machines, a restriction called CORS). The container is managed as a system service that starts automatically on boot and restarts if it crashes. To deploy an update: pull the latest code, rebuild the app and container, then restart the service.
 
 ## Architecture
 
@@ -45,6 +45,10 @@ http://nefarian.xray.aps.anl.gov:4173
 
 It is managed as a systemd user service (`container-kestrel.service`) that starts
 automatically on boot and restarts on failure.
+
+> **If this URL changes,** update it in `docs/index.md` as well. The Quick Start on the
+> published user site points users straight at this address, and there is nothing that
+> keeps the two in sync automatically.
 
 ### Useful commands
 
@@ -194,6 +198,9 @@ rm ~/.config/systemd/user/container-kestrel.service
 systemctl --user daemon-reload
 ```
 
+Then update the Quick Start URL in `docs/index.md` to IT's address, so the published
+user guide stops sending people to a host that is no longer serving the app.
+
 ---
 
 ## Syncing the GitLab mirror
@@ -228,3 +235,8 @@ git push --mirror gitlab
 | Source code (GitHub) | `https://github.com/BCDA-APS/kestrel` |
 | Working directory | `~/workspace/webviz` |
 | GitLab mirror clone | `~/workspace/kestrel.git` |
+
+> **Note on the `webviz` directory name:** the app was renamed from *Webviz* to *Kestrel*, but the checkout
+> directory on nefarian is still called `~/workspace/webviz` for historical reasons. The folder name has no
+> functional meaning. Paths in this document that say `webviz` are correct as written; don't "fix" them
+> unless you also rename the directory.

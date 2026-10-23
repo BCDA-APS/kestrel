@@ -29,7 +29,6 @@ theme:
 
 nav:
   - Home: index.md
-  - Installation: installation.md
   - User Guide:
     - Getting Started: usage/getting-started.md
     - Plotting: usage/plotting.md
@@ -37,7 +36,6 @@ nav:
     - Image Viewer: usage/image-viewer.md
     - Analysis: usage/analysis.md
     - QServer: usage/qserver.md
-  - Development: development.md
 
 markdown_extensions:
   - admonition

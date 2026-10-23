@@ -1,6 +1,6 @@
-# Connecting Webviz to an Existing Bluesky Queue Server
+# Connecting Kestrel to an Existing Bluesky Queue Server
 
-Webviz communicates with the Bluesky Queue Server via **bluesky-httpserver**, an HTTP REST API layer that sits in front of the ZMQ-based `bluesky-queueserver`. Browsers cannot speak ZMQ directly, so this HTTP layer is required.
+Kestrel communicates with the Bluesky Queue Server via **bluesky-httpserver**, an HTTP REST API layer that sits in front of the ZMQ-based `bluesky-queueserver`. Browsers cannot speak ZMQ directly, so this HTTP layer is required.
 
 ---
 
@@ -27,7 +27,7 @@ pip install "bluesky-httpserver==0.0.13" "bluesky-queueserver-api==0.0.12"
 
 By default, anonymous users only get `read:status` scope — not enough to access queue, history, plans, or console output. Setting `QSERVER_HTTP_SERVER_CONFIG` activates full scope checking, so you must explicitly grant all needed scopes using `scopes_set` (which replaces the defaults entirely, unlike `scopes_add` which only appends to `{read:status}`).
 
-Copy `docs/qs_permissions.yml` from this repo to your instrument directory (e.g. `scripts/qs_permissions.yml`). It grants anonymous users the full set of scopes needed for Webviz:
+Copy `dev-docs/qs_permissions.yml` from this repo to your instrument directory (e.g. `scripts/qs_permissions.yml`). It grants anonymous users the full set of scopes needed for Kestrel:
 
 ```yaml
 api_access:
@@ -70,7 +70,7 @@ export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib"
 # Allow connections without an API key
 export QSERVER_HTTP_SERVER_ALLOW_ANONYMOUS_ACCESS=1
 
-# Grant anonymous users full Webviz scopes (queue, history, console, etc.)
+# Grant anonymous users full Kestrel scopes (queue, history, console, etc.)
 export QSERVER_HTTP_SERVER_CONFIG=/path/to/scripts/qs_permissions.yml
 
 # ZMQ addresses of the running queueserver
@@ -91,7 +91,7 @@ chmod +x scripts/qs_http.sh
 | Variable | Value | Purpose |
 |---|---|---|
 | `QSERVER_HTTP_SERVER_ALLOW_ANONYMOUS_ACCESS` | `1` | Disable API key requirement |
-| `QSERVER_HTTP_SERVER_CONFIG` | path to YAML file | Grants full Webviz scopes to anonymous users |
+| `QSERVER_HTTP_SERVER_CONFIG` | path to YAML file | Grants full Kestrel scopes to anonymous users |
 | `QSERVER_ZMQ_CONTROL_ADDRESS` | `tcp://localhost:60615` | ZMQ control socket of queueserver |
 | `QSERVER_ZMQ_INFO_ADDRESS` | `tcp://localhost:60625` | ZMQ info socket of queueserver |
 
@@ -124,9 +124,9 @@ The server listens on port **60610**.
 
 ---
 
-## 5. Connect from Webviz
+## 5. Connect from Kestrel
 
-1. Open the **Queue Server** tab in Webviz
+1. Open the **Queue Server** tab in Kestrel
 2. Set the HTTP URL to `http://<hostname>:60610` (e.g. `http://nefarian.xray.aps.anl.gov:60610`)
 3. Leave the API Key field empty
 4. Click **Connect**
@@ -137,7 +137,7 @@ The status bar should show the Manager state, RE state, and queue count.
 
 ## How it works
 
-Webviz cannot fetch directly from the remote httpserver due to browser CORS restrictions. Instead, the Vite dev server acts as a CORS proxy:
+Kestrel cannot fetch directly from the remote httpserver due to browser CORS restrictions. Instead, the Vite dev server acts as a CORS proxy:
 
 ```
 Browser → /qs-proxy/http/<host>:<port>/api/... → Vite proxy → http://<host>:<port>/api/...
