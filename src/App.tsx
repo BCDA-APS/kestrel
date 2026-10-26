@@ -12,7 +12,7 @@ import GridScan1DPanel from './components/GridScan1DPanel';
 import ImagePanel from './components/ImagePanel';
 import type { Panel, XYTrace, TraceStyle } from './types';
 import { DEFAULT_TRACE_STYLE } from './constants';
-import { matchesDev, matchesToken } from './utils/fieldUtils';
+import { assignTraceAxes, matchesDev, matchesToken, selectPlotStream } from './utils/fieldUtils';
 import { fitData, MODEL_NAMES } from './fitting';
 import type { FitResult } from './fitting';
 
@@ -112,14 +112,14 @@ function copyToClipboard(text: string): void {
 async function fetchRunTraces(
   serverUrl: string, catalog: string, runId: string, runLabel: string,
   detectors: string[], hintsDetectors: string[], motors: string[],
-  preferX: string, preferYs: string[],
+  preferX: string, preferYs: string[], dichroMode: boolean,
 ): Promise<XYTrace[]> {
   const cs = catSeg(catalog);
 
   // 1. Streams
   const sj = await fetch(`${serverUrl}/api/v1/search${cs}/${runId}?page[limit]=50`).then(r => r.json());
   const streams: string[] = (sj.data ?? []).map((i: any) => i.id); // eslint-disable-line @typescript-eslint/no-explicit-any
-  const stream = streams.includes('primary') ? 'primary' : (streams[0] ?? '');
+  const stream = selectPlotStream(streams, dichroMode);
   if (!stream) throw new Error('no streams');
 
   // 2. Fields — handle array / table / sub-node layouts
@@ -591,13 +591,8 @@ export default function App() {
   const isGridScanRef = useRef(isGridScan);
   useEffect(() => { isGridScanRef.current = isGridScan; }, [isGridScan]);
 
-  // When both dichro fields are plotted together, assign xas to left axis and xmcd to right.
-  const dichroAxes = (traces: XYTrace[]): ('y1' | 'y2')[] => {
-    const labels = traces.map(t => t.yLabel);
-    if (labels.includes('dichro_xas') && labels.includes('dichro_xmcd'))
-      return traces.map(t => t.yLabel === 'dichro_xmcd' ? 'y2' : 'y1');
-    return [];
-  };
+  // Keep the first two selected signals on separate axes for different magnitudes.
+  const initialTraceAxes = (traces: XYTrace[]): ('y1' | 'y2')[] => assignTraceAxes(traces.length);
 
   const plot = useCallback((traces: XYTrace[], title: string) => {
     if (isGridScanRef.current) {
@@ -618,7 +613,7 @@ export default function App() {
     setFitResults(null);
     setShowDerivative(false);
     setShowWaterfall(false);
-    setTraceAxes(dichroAxes(traces));
+    setTraceAxes(initialTraceAxes(traces));
   }, [selectedRunId]);
 
   const livePlot = useCallback((traces: XYTrace[], title: string, stream: string, dataSubNode: string, dataNodeFamily: 'array' | 'table') => {
@@ -657,7 +652,7 @@ export default function App() {
     setFitResults(null);
     setShowDerivative(false);
     setShowWaterfall(false);
-    setTraceAxes(dichroAxes(traces));
+    setTraceAxes(initialTraceAxes(traces));
   }, [serverUrl, selectedCatalog, selectedRunId]);
 
   const stopLive = useCallback(() => {
@@ -689,6 +684,21 @@ export default function App() {
     });
   }, []);
 
+  // Preserve each signal's axis when adding another run with the same fields.
+  const addTracesMatchingAxes = useCallback((traces: XYTrace[]) => {
+    const existing = panelRef.current;
+    if (!existing || existing.type !== 'xy') return;
+    const existingKeys = new Set(existing.traces.map(t => `${t.runId}|${t.xLabel}|${t.yLabel}`));
+    const newTraces = traces.filter(t => !existingKeys.has(`${t.runId}|${t.xLabel}|${t.yLabel}`));
+    if (newTraces.length === 0) return;
+    const axisByLabel = new Map(existing.traces.map((t, i) => [t.yLabel, traceAxes[i] ?? 'y1']));
+    addTraces(newTraces);
+    setTraceAxes(prev => [
+      ...prev,
+      ...newTraces.map((t, i) => axisByLabel.get(t.yLabel) ?? (i === 1 ? 'y2' : 'y1')),
+    ]);
+  }, [addTraces, traceAxes]);
+
   const addTracesRight = useCallback((traces: XYTrace[]) => {
     const existing = panelRef.current;
     if (!existing || existing.type !== 'xy') return;
@@ -712,9 +722,9 @@ export default function App() {
     setAddRunId(runId);
     setAddRunError(null);
     try {
-      const traces = await fetchRunTraces(serverUrl, selectedCatalog ?? '', runId, label, detectors, hintsDetectors, motors, preferX, preferYs);
+      const traces = await fetchRunTraces(serverUrl, selectedCatalog ?? '', runId, label, detectors, hintsDetectors, motors, preferX, preferYs, settings.dichroMode !== false);
       if (hasGraph) {
-        addTraces(traces);
+        addTracesMatchingAxes(traces);
       } else {
         plot(traces, label || runId.slice(0, 7));
       }
@@ -725,7 +735,7 @@ export default function App() {
     } finally {
       setAddRunId(null);
     }
-  }, [serverUrl, selectedCatalog, addTraces, plot]);
+  }, [serverUrl, selectedCatalog, settings.dichroMode, addTracesMatchingAxes, plot]);
 
   const handleAltClickRun = useCallback(async (runId: string, label: string, detectors: string[], hintsDetectors: string[], motors: string[]) => {
     const currentPanel = panelRef.current;
@@ -735,7 +745,7 @@ export default function App() {
     setAddRunId(runId);
     setAddRunError(null);
     try {
-      const traces = await fetchRunTraces(serverUrl, selectedCatalog ?? '', runId, label, detectors, hintsDetectors, motors, preferX, preferYs);
+      const traces = await fetchRunTraces(serverUrl, selectedCatalog ?? '', runId, label, detectors, hintsDetectors, motors, preferX, preferYs, settings.dichroMode !== false);
       if (hasGraph) {
         addTracesRight(traces);
       } else {
@@ -748,7 +758,7 @@ export default function App() {
     } finally {
       setAddRunId(null);
     }
-  }, [serverUrl, selectedCatalog, addTracesRight, plot]);
+  }, [serverUrl, selectedCatalog, settings.dichroMode, addTracesRight, plot]);
 
   const removeTrace = useCallback((index: number) => {
     setPanel((prev) => {

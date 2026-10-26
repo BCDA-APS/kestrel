@@ -222,8 +222,12 @@ function XYPanelContent({ panel, onRemove, onRemoveTrace, onStopLive, onLiveTrac
     !t.runId.startsWith('__deriv__') && (traceAxes?.[i] ?? 'y1') === 'y2'
   );
   const derivTraces = displayTraces.filter(t => t.runId.startsWith('__deriv__'));
-  const yAxisTitle = leftTraces.length === 1 ? leftTraces[0].yLabel : 'Value';
-  const y2Title = rightUserTraces.length === 1 ? rightUserTraces[0].yLabel
+  const sharedAxisTitle = (traces: XYTrace[]) => {
+    const labels = new Set(traces.map(t => t.yLabel));
+    return labels.size === 1 ? traces[0].yLabel : 'Value';
+  };
+  const yAxisTitle = sharedAxisTitle(leftTraces);
+  const y2Title = rightUserTraces.length > 0 ? sharedAxisTitle(rightUserTraces)
     : derivTraces.length > 0 ? 'd/dx'
     : 'Value';
   const hasRightAxis = derivTraces.length > 0 || rightUserTraces.length > 0;
