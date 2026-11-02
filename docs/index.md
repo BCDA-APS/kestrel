@@ -23,7 +23,7 @@ BCDA, Advanced Photon Source, Argonne National Laboratory
 Open Kestrel at:
 
 ```
-http://nefarian.xray.aps.anl.gov:4173
+http://watt.xray.aps.anl.gov:4173
 ```
 
 Enter your Tiled server URL, click **Connect**, and select a catalog.

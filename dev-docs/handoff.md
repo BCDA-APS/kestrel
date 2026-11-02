@@ -30,7 +30,7 @@ Steps to transfer maintenance of Kestrel to a new maintainer.
 
 ## Deployment
 
-Kestrel is moving off nefarian to an IT-managed host. Agreed with APS IT
+Kestrel has moved to IT-managed host (watt.xray.aps.anl.gov). Agreed with APS IT
 (David Wallis):
 
 - Host: `watt.aps.anl.gov`
