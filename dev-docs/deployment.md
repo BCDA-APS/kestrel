@@ -1,17 +1,18 @@
 # Deployment
 
-> **Summary:** The web app runs inside a container on a workstation called **nefarian**, which anyone on the network can reach at `http://nefarian.xray.aps.anl.gov:4173`. The container bundles the React frontend and a small Node server that acts as a middleman — it forwards browser requests to Tiled and QServer so the browser doesn't have to talk to those directly (browsers block a page from calling out to other machines, a restriction called CORS). The container is managed as a system service that starts automatically on boot and restarts if it crashes. To deploy an update: pull the latest code, rebuild the app and container, then restart the service.
+> **Summary:** The web app runs in a rootless Podman container on `watt.xray.aps.anl.gov` and is managed by a systemd user service. The image is built from the GitHub source, tagged with its short Git revision, and pushed to the APS GitLab registry. To deploy an update: build and test the source, push the immutable revision tag, pull that exact tag on `watt`, update the service's `KESTREL_IMAGE` value, and restart the service.
 
 ## Architecture
 
 ```
 Browser 
-           │  http://nefarian.xray.aps.anl.gov:4173
+           │  http://watt.xray.aps.anl.gov:4173
            ▼
-     ┌─────────────────────────────────────────┐
-     │  Podman container (kestrel:0.1.0)       │
-     │  managed by systemd user service        │
-     │                                         │
+      ┌─────────────────────────────────────────┐
+      │  Podman container (Git revision tag)    │
+      │  managed by systemd user service        │
+      │                                         │
+
      │  server.mjs (Express, port 4173)        │
      │  ├── serves dist/   (the React app)     │
      │  ├── /tiled-proxy/  → Tiled server      │
@@ -37,14 +38,14 @@ Tiled or QServer on the browser's behalf.
 
 ## Current setup
 
-The container runs on **nefarian** and is accessible at:
+The container runs on **watt** by user `epicsadm` and is accessible at:
 
 ```
-http://nefarian.xray.aps.anl.gov:4173
+http://watt.xray.aps.anl.gov:4173
 ```
 
-It is managed as a systemd user service (`container-kestrel.service`) that starts
-automatically on boot and restarts on failure.
+It is managed as the rootless systemd user service `kestrel.service`, which starts
+automatically after the deploying user's systemd user manager starts and restarts on failure.
 
 > **If this URL changes,** update it in `docs/index.md` as well. The Quick Start on the
 > published user site points users straight at this address, and there is nothing that
@@ -54,56 +55,80 @@ automatically on boot and restarts on failure.
 
 ```bash
 # Check status
-systemctl --user status container-kestrel.service
+systemctl --user status kestrel.service
 
 # Start / stop / restart
-systemctl --user start   container-kestrel.service
-systemctl --user stop    container-kestrel.service
-systemctl --user restart container-kestrel.service
+systemctl --user start   kestrel.service
+systemctl --user stop    kestrel.service
+systemctl --user restart kestrel.service
 
-# Enable / disable auto-start on reboot
-systemctl --user enable  container-kestrel.service
-systemctl --user disable container-kestrel.service
+# Enable / disable auto-start
+systemctl --user enable  kestrel.service
+systemctl --user disable kestrel.service
 
-# View logs
-journalctl --user -u container-kestrel.service -n 100 --no-pager
+# View logs, last 100 lines
+journalctl --user -u kestrel.service -n 100 --no-pager
+# continuous
+journalctl --user -q -f -u kestrel.service
 ```
 
 ---
 
 ## Deploying an update
 
+Perform the build and registry steps from a GitHub checkout. Deploy the exact same
+short Git revision to `watt`; do not use a mutable `latest` tag.
+
 ```bash
-conda activate kestrel
-cd ~/workspace/webviz
-git pull
+git clone https://github.com/BCDA-APS/kestrel.git
+cd kestrel
+git checkout main
+git pull --ff-only
+GIT_REVISION=$(git rev-parse --short HEAD)
+npm ci
+npm test
 npm run build
-podman build -t kestrel:0.1.0 .
-systemctl --user restart container-kestrel.service
+podman build --no-hosts -f Containerfile -t "kestrel:${GIT_REVISION}" .
+podman run --no-hosts --rm -d --name kestrel-test -p 4173:4173 "kestrel:${GIT_REVISION}"
+curl -I http://127.0.0.1:4173
+podman stop kestrel-test
+podman login git.aps.anl.gov:8443
+podman tag "kestrel:${GIT_REVISION}" "git.aps.anl.gov:8443/bcda/kestrel:${GIT_REVISION}"
+podman push "git.aps.anl.gov:8443/bcda/kestrel:${GIT_REVISION}"
 ```
-Here's exactly what each step does and why it results in network-wide access:
 
-- `npm run build`: compiles the React app into static files in `dist/`
-
-- `podman build -t kestrel:0.1.0 .`: packages everything into a container: the `dist/` folder + `server.mjs` (a custom Express server). The container exposes port `4173``.
-
-- `systemctl --user restart container-kestrel.service`: Podman can generate systemd unit files for containers. This is what gives auto-restart and persistence across reboots.
-
-- Why it's accessible from the network: `server.mjs` calls `http.createServer(app).listen(PORT)` without specifying a hostname, which means it binds to `0.0.0.0` (all network interfaces). So any machine that can reach nefarian on port 4173 can access it.
-
-> **Note:** This network-wide binding only applies to the production container. `npm run dev` (Vite's dev server) defaults to `localhost` and is only accessible from the same machine. To expose the dev server on the network you would need to add `server: { host: '0.0.0.0' }` to `vite.config.ts`.
-
-## One-time setup (nefarian or any new host)
-
-### 1. Build environment
+On `watt`, pull the exact revision:
 
 ```bash
-conda create -n kestrel nodejs
-conda activate kestrel
-npm install
+GIT_REVISION=<revision-from-the-build-session>
+podman login git.aps.anl.gov:8443
+podman pull "git.aps.anl.gov:8443/bcda/kestrel:${GIT_REVISION}"
 ```
 
-### 2. Rootless Podman prerequisites
+Edit `~/.config/systemd/user/kestrel.service` and update the one clearly labeled
+image line:
+
+```ini
+# Update this line when deploying a new revision.
+Environment=KESTREL_IMAGE=git.aps.anl.gov:8443/bcda/kestrel:<GIT_REVISION>
+```
+
+Then reload and restart the service:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user restart kestrel.service
+curl -I http://127.0.0.1:4173
+```
+
+The image tag in `KESTREL_IMAGE` is the deployed version. To roll back, replace it
+with a previously deployed Git revision, pull that tag, and restart the service.
+
+The production server binds to all network interfaces, so machines that can reach
+`watt` on port `4173` can access it. The Vite development server defaults to
+`localhost` and is not network-accessible.
+
+## One-time setup on watt
 
 Rootless Podman requires subordinate UID/GID ranges. Check they exist:
 
@@ -112,94 +137,72 @@ grep "^$USER:" /etc/subuid
 grep "^$USER:" /etc/subgid
 ```
 
-If missing, ask an admin to add them:
-
-```bash
-sudo usermod --add-subuids 100000-165535 <username>
-sudo usermod --add-subgids 100000-165535 <username>
-```
-
-Then log out, log back in, and run:
+If either range is missing, ask an administrator to add it. After the change,
+log out, log back in, and run:
 
 ```bash
 podman system migrate
 ```
 
-### 3. Move Podman storage off NFS
+Podman storage must be on a local filesystem, not NFS. If `podman info` reports
+an NFS graph root, ask an administrator to configure local storage for your
+account before building images.
 
-Podman's storage must be on a local filesystem — NFS will cause build failures.
-Create `~/.config/containers/storage.conf`:
-
-```toml
-[storage]
-driver = "overlay"
-graphroot = "/local/<username>/.local/share/containers/storage"
-runroot = "/run/user/<UID>/containers"
-```
-
-> Use your real numeric UID (from `id -u`) in `runroot`. Do not use shell
-> expansion like `$(id -u)` — this file does not support it.
-
-### 4. Build and run the container
-
-```bash
-conda activate kestrel
-cd ~/workspace/webviz
-npm run build
-podman build -t kestrel:0.1.0 .
-podman run -d --name kestrel -p 4173:4173 --restart unless-stopped kestrel:0.1.0
-```
-
-Verify it is running:
-
-```bash
-podman ps --filter name=kestrel
-curl -I http://127.0.0.1:4173
-```
-
-### 5. Create the systemd user service
+Create the rootless systemd user service:
 
 ```bash
 mkdir -p ~/.config/systemd/user
-podman generate systemd --name kestrel --files --new
-mv container-kestrel.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now container-kestrel.service
+```
 
-# Allow the service to run at boot even when not logged in
+Save the following as `~/.config/systemd/user/kestrel.service`. Replace
+`<GIT_REVISION>` with the revision being deployed:
+
+```ini
+[Unit]
+Description=Kestrel web application
+Wants=network-online.target
+After=network-online.target
+# watt's system hostname is watt-vm.
+ConditionHost=watt-vm
+
+[Service]
+# Update this line when deploying a new revision.
+Environment=KESTREL_IMAGE=git.aps.anl.gov:8443/bcda/kestrel:<GIT_REVISION>
+
+Restart=always
+ExecStartPre=-/usr/bin/podman rm -f kestrel
+ExecStart=/usr/bin/podman run --name kestrel --no-hosts -p 4173:4173 ${KESTREL_IMAGE}
+ExecStop=/usr/bin/podman stop -t 10 kestrel
+ExecStopPost=/usr/bin/podman rm -f kestrel
+
+[Install]
+WantedBy=default.target
+```
+
+Enable the service and allow it to run after logout and at boot:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable kestrel.service
 loginctl enable-linger "$USER"
 ```
+
+`ConditionHost` prevents this unit from starting on another host. The service
+is rootless, so install it in the deploying user's systemd directory, not in
+`/etc/systemd/system`.
 
 ---
 
 ## When IT takes over
 
-### Push the image to the GitLab registry
+The GitLab registry is the handoff point for APS IT. Provide IT with the exact
+Git revision tag and the service configuration, or ask them to pull the image
+and restart the deployment on their managed host.
 
-```bash
-podman login git.aps.anl.gov:8443   # username & password
-podman tag kestrel:0.1.0 git.aps.anl.gov:8443/bcda/kestrel:0.1.0
-podman tag kestrel:0.1.0 git.aps.anl.gov:8443/bcda/kestrel:latest
-podman push git.aps.anl.gov:8443/bcda/kestrel:0.1.0
-podman push git.aps.anl.gov:8443/bcda/kestrel:latest
-```
+Do not push `latest`; immutable revision tags make rollback possible.
 
-Then tell IT to pull the image and restart the container on their server.
-
-### Stop the nefarian instance
-
-Once IT's server is live, stop and disable the container on nefarian:
-
-```bash
-systemctl --user stop    container-kestrel.service
-systemctl --user disable container-kestrel.service
-loginctl disable-linger "$USER"
-rm ~/.config/systemd/user/container-kestrel.service
-systemctl --user daemon-reload
-```
-
-Then update the Quick Start URL in `docs/index.md` to IT's address, so the published
-user guide stops sending people to a host that is no longer serving the app.
+If the public URL changes, update the Quick Start URL in `docs/index.md` so the
+published user guide does not point to an inactive deployment.
 
 ---
 
@@ -223,6 +226,7 @@ git push --mirror gitlab
 | `Network file system detected as backing store` | Podman `graphroot` is on NFS | Move `graphroot` to a local path in `storage.conf` |
 | `EACCES: permission denied … package-lock.json` | Files copied as root in build stage | Ensure `COPY --chown=1001:0` in `Containerfile` |
 | `database/runroot mismatch` | Stale Podman state after storage reconfiguration | `rm -rf /local/<username>/.local/share/containers/storage && podman info` |
+| `failed to create new hosts file` | Rootless Podman cannot create `/etc/hosts` on the APS host | Add `--no-hosts` to `podman build` and `podman run` |
 
 ---
 
@@ -230,13 +234,9 @@ git push --mirror gitlab
 
 | Item | Value |
 |------|-------|
-| Running instance | `http://nefarian.xray.aps.anl.gov:4173` |
+| Running instance | `http://watt.xray.aps.anl.gov:4173` |
+| Deployment host | `watt.xray.aps.anl.gov` (system hostname: `watt-vm`) |
 | GitLab registry | `git.aps.anl.gov:8443/bcda/kestrel` |
 | Source code (GitHub) | `https://github.com/BCDA-APS/kestrel` |
-| Working directory | `~/workspace/webviz` |
-| GitLab mirror clone | `~/workspace/kestrel.git` |
-
-> **Note on the `webviz` directory name:** the app was renamed from *Webviz* to *Kestrel*, but the checkout
-> directory on nefarian is still called `~/workspace/webviz` for historical reasons. The folder name has no
-> functional meaning. Paths in this document that say `webviz` are correct as written; don't "fix" them
-> unless you also rename the directory.
+| Systemd user service | `kestrel.service` |
+| Service file | `~/.config/systemd/user/kestrel.service` |
