@@ -15,6 +15,8 @@ BCDA, Advanced Photon Source, Argonne National Laboratory
 - **Analysis tools** — log axes, derivatives, smoothing, curve fitting, dual cursors
 - **QServer integration** — submit and monitor plans from the bluesky queue server
 - **Run browser** — searchable run table with metadata, summary, and raw data tabs
+- **Dichro mode** — automatic field and axis selection for dichroism scans (POLAR)
+- **App window** — reopen Kestrel in a slim window with no tabs or bookmarks bar
 
 ---
 
