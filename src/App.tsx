@@ -92,7 +92,7 @@ function buildDesktopAppCommand(): string {
 }
 
 // navigator.clipboard is only defined on HTTPS / localhost. On plain-HTTP
-// deploys (e.g. the podman build served from nefarian:4173) it is undefined,
+// deploys (e.g. the podman build served from watt:4173) it is undefined,
 // so we fall back to the deprecated-but-still-supported execCommand path.
 function copyToClipboard(text: string): void {
   if (navigator.clipboard) {

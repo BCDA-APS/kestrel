@@ -9,7 +9,7 @@ function tiledProxyPlugin(): Plugin {
     configureServer(server) {
       server.middlewares.use('/tiled-proxy', (req, res) => {
         // req.url is the path after /tiled-proxy
-        // e.g. /http/nefarian.xray.aps.anl.gov:8020/api/v1
+        // e.g. /http://watt.xray.aps.anl.gov:8020/api/v1
         const url = req.url ?? '/';
         const match = url.match(/^\/?([^/]+)\/([^/]+)(\/.*)?$/);
         if (!match) {
@@ -19,7 +19,7 @@ function tiledProxyPlugin(): Plugin {
         }
 
         const protocol = match[1]; // 'http' or 'https'
-        const host = match[2];     // 'nefarian.xray.aps.anl.gov:8020'
+        const host = match[2];     // 'watt.xray.aps.anl.gov:8020'
         const rawPath = match[3] ?? '/';
 
         // Some Tiled trees don't support sorting — strip the sort param
