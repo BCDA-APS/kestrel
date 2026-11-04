@@ -25,9 +25,9 @@ pip install "bluesky-httpserver==0.0.13" "bluesky-queueserver-api==0.0.12"
 
 ## 2. Create a permissions config file
 
-By default, anonymous users only get `read:status` scope — not enough to access queue, history, plans, or console output. Setting `QSERVER_HTTP_SERVER_CONFIG` activates full scope checking, so you must explicitly grant all needed scopes using `scopes_set` (which replaces the defaults entirely, unlike `scopes_add` which only appends to `{read:status}`).
+By default, clients only get `read:status` scope, which is not enough to access queue, history, plans, or console output. Setting `QSERVER_HTTP_SERVER_CONFIG` activates full scope checking, so you must explicitly grant all needed scopes using `scopes_set` (which replaces the defaults entirely, unlike `scopes_add`, which only appends to `{read:status}`).
 
-Copy `dev-docs/qs_permissions.yml` from this repo to your instrument directory (e.g. `scripts/qs_permissions.yml`). It grants anonymous users the full set of scopes needed for Kestrel:
+Copy `dev-docs/qs_permissions.yml` from this repo to your instrument directory (e.g. `scripts/qs_permissions.yml`). It grants the full set of scopes needed for Kestrel:
 
 ```yaml
 api_access:
@@ -67,11 +67,11 @@ CONDA_ENV=your_env_name
 export CONDA_PREFIX=${HOME}/.conda/envs/${CONDA_ENV}
 export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib"
 
-# Allow connections without an API key
-export QSERVER_HTTP_SERVER_ALLOW_ANONYMOUS_ACCESS=1
-
-# Grant anonymous users full Kestrel scopes (queue, history, console, etc.)
+# Scopes granted to clients (see step 2)
 export QSERVER_HTTP_SERVER_CONFIG=/path/to/scripts/qs_permissions.yml
+
+# The API key Kestrel must send with each request, in the Authorization header
+export QSERVER_HTTP_SERVER_SINGLE_USER_API_KEY="your-api-key"
 
 # ZMQ addresses of the running queueserver
 export QSERVER_ZMQ_CONTROL_ADDRESS="tcp://localhost:60615"
@@ -90,12 +90,12 @@ chmod +x scripts/qs_http.sh
 
 | Variable | Value | Purpose |
 |---|---|---|
-| `QSERVER_HTTP_SERVER_ALLOW_ANONYMOUS_ACCESS` | `1` | Disable API key requirement |
-| `QSERVER_HTTP_SERVER_CONFIG` | path to YAML file | Grants full Kestrel scopes to anonymous users |
+| `QSERVER_HTTP_SERVER_CONFIG` | path to YAML file | Grants the full set of Kestrel scopes |
+| `QSERVER_HTTP_SERVER_SINGLE_USER_API_KEY` | a string you choose | The key Kestrel must send to be allowed in |
 | `QSERVER_ZMQ_CONTROL_ADDRESS` | `tcp://localhost:60615` | ZMQ control socket of queueserver |
 | `QSERVER_ZMQ_INFO_ADDRESS` | `tcp://localhost:60625` | ZMQ info socket of queueserver |
 
-> **Important:** The env var name is `QSERVER_HTTP_SERVER_ALLOW_ANONYMOUS_ACCESS` (not `QSERVER_ALLOW_ANONYMOUS_ACCESS`). The value must be `1`, not `true`.
+> Pick a real value for the API key rather than leaving a placeholder, and do not commit it to the repository.
 
 ---
 
@@ -108,39 +108,27 @@ conda activate your_env_name
 ./scripts/qs_http.sh
 ```
 
-Confirm the startup log shows:
-
-```
-'allow_anonymous_access': True,
-```
-
-and:
-
-```
-The server is running in 'public' mode, permitting open, anonymous access
-```
-
 The server listens on port **60610**.
 
 ---
 
 ## 5. Connect from Kestrel
 
-1. Open the **Queue Server** tab in Kestrel
-2. Set the HTTP URL to `http://<hostname>:60610` (e.g. `http://nefarian.xray.aps.anl.gov:60610`)
-3. Leave the API Key field empty
+1. Open **Settings** (gear icon) and enter the API key from step 3 in the **API Key** field
+2. Open the **Queue Server** tab
+3. Set the HTTP URL to `http://<hostname>:60610`
 4. Click **Connect**
 
-The status bar should show the Manager state, RE state, and queue count.
+The status bar should show the Manager state, RE state, and queue count. A 401 means the API key is missing or does not match the one in the startup script.
 
 ---
 
 ## How it works
 
-Kestrel cannot fetch directly from the remote httpserver due to browser CORS restrictions. Instead, the Vite dev server acts as a CORS proxy:
+Kestrel cannot fetch directly from the remote httpserver because of browser CORS restrictions, so requests are relayed through whichever server is serving Kestrel:
 
 ```
-Browser → /qs-proxy/http/<host>:<port>/api/... → Vite proxy → http://<host>:<port>/api/...
+Browser -> /qs-proxy/http/<host>:<port>/api/... -> proxy -> http://<host>:<port>/api/...
 ```
 
-This proxy is configured in `vite.config.ts` and requires no additional setup.
+In development that proxy is the Vite dev server, configured in `vite.config.ts`. In the deployed app it is `server.mjs`, which serves the built files and relays `/qs-proxy/`, `/qs-stream/` and `/tiled-proxy/`. Neither needs extra setup.
