@@ -34,3 +34,5 @@ export type TraceStyle = {
   lineDash: 'solid' | 'dash' | 'dot' | 'dashdot' | 'none';
   markerSymbol: 'circle' | 'square' | 'diamond' | 'triangle-up' | 'cross' | 'x' | 'none';
 };
+
+export type CursorPersistenceMode = 'always-clear' | 'clear-on-axis-change' | 'keep';
