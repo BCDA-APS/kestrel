@@ -493,21 +493,29 @@ export default function AnalysisPanel({
             {(cursor1 != null || cursor2 != null) && (
               <div className="mt-1 flex flex-col gap-1 text-xs font-mono">
                 {cursor1 != null && (
-                  <div className="flex items-center gap-1">
-                    <span style={{ color: CURSOR_COLORS[0] }} className="font-bold shrink-0">C1</span>
-                    <span className="text-gray-600">x={formatValue(cursor1)}</span>
-                    {cursor1Y != null && <span className="text-gray-500">y={formatValue(cursor1Y)}</span>}
-                    <button onClick={onClearCursor1} className="ml-auto text-gray-300 hover:text-gray-500 text-xs leading-none">×</button>
-                  </div>
-                )}
+                   <div className="flex items-center gap-1">
+                     <span style={{ color: CURSOR_COLORS[0] }} className="font-bold shrink-0">C1</span>
+                     <span className="text-gray-600">x={formatValue(cursor1)}</span>
+                     {cursor1Y != null && <span className="text-gray-500">y={formatValue(cursor1Y)}</span>}
+                      <button
+                        onClick={onClearCursor1}
+                        title="Remove cursor C1"
+                        className="ml-auto text-xs border border-gray-300 rounded px-1.5 py-0.5 hover:bg-gray-100 hover:border-gray-400 text-gray-700 transition-colors cursor-pointer"
+                      >×</button>
+                   </div>
+                 )}
                 {cursor2 != null && (
-                  <div className="flex items-center gap-1">
-                    <span style={{ color: CURSOR_COLORS[1] }} className="font-bold shrink-0">C2</span>
-                    <span className="text-gray-600">x={formatValue(cursor2)}</span>
-                    {cursor2Y != null && <span className="text-gray-500">y={formatValue(cursor2Y)}</span>}
-                    <button onClick={onClearCursor2} className="ml-auto text-gray-300 hover:text-gray-500 text-xs leading-none">×</button>
-                  </div>
-                )}
+                   <div className="flex items-center gap-1">
+                     <span style={{ color: CURSOR_COLORS[1] }} className="font-bold shrink-0">C2</span>
+                     <span className="text-gray-600">x={formatValue(cursor2)}</span>
+                     {cursor2Y != null && <span className="text-gray-500">y={formatValue(cursor2Y)}</span>}
+                      <button
+                        onClick={onClearCursor2}
+                        title="Remove cursor C2"
+                        className="ml-auto text-xs border border-gray-300 rounded px-1.5 py-0.5 hover:bg-gray-100 hover:border-gray-400 text-gray-700 transition-colors cursor-pointer"
+                      >×</button>
+                   </div>
+                 )}
                 {cursor1 != null && cursor2 != null && (
                   <div className="mt-0.5 pt-1 border-t border-gray-100 flex flex-col gap-0.5 text-gray-600">
                     <span>Δx = {formatValue(Math.abs(cursor2 - cursor1))}</span>
@@ -521,9 +529,10 @@ export default function AnalysisPanel({
                   </div>
                 )}
                 <button
-                  onClick={onClearAllCursors}
-                  className="mt-1 text-xs text-gray-400 hover:text-gray-600 text-left"
-                >Clear all</button>
+                   onClick={onClearAllCursors}
+                   title="Remove all cursors"
+                   className="mt-1 text-xs border border-gray-300 rounded px-2 py-1 hover:bg-gray-100 hover:border-gray-400 text-gray-700 transition-colors cursor-pointer"
+                 >Clear all</button>
               </div>
             )}
             {!hasXYPanel && <p className="text-xs text-gray-400 italic">Open a plot to enable cursors.</p>}
