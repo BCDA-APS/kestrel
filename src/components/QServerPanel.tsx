@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { formatDateTimeISO8601 } from '../utils/dateFormatter';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -668,8 +669,8 @@ export default function QServerPanel({ proxyUrl, serverUrl: _serverUrl, onStatus
     const rows = [
       ['start_time', 'stop_time', 'name', 'kwargs', 'exit_status', 'scan_ids', 'run_uids'],
       ...history.map(item => [
-        item.result?.time_start != null ? new Date(item.result.time_start * 1000).toLocaleString() : '',
-        item.result?.time_stop != null ? new Date(item.result.time_stop * 1000).toLocaleString() : '',
+        item.result?.time_start != null ? formatDateTimeISO8601(item.result.time_start) : '',
+        item.result?.time_stop != null ? formatDateTimeISO8601(item.result.time_stop) : '',
         item.name,
         itemSummary(item, allowedPlans),
         item.result?.exit_status ?? item.status ?? '',

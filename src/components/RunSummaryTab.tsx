@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { formatDateTimeISO8601 } from '../utils/dateFormatter';
 
 type Props = {
   serverUrl: string;
@@ -246,7 +247,7 @@ export default function RunSummaryTab({ serverUrl, catalog, runId, runAcquiring 
     ? start.motors
     : Array.isArray(start.positioners) ? start.positioners
     : (start.axes && typeof start.axes === 'object' ? Object.keys(start.axes) : []);
-  const startTime = start.time ? new Date(start.time * 1000).toLocaleString() : '—';
+  const startTime = formatDateTimeISO8601(start.time);
   const exitStatus = stop?.exit_status ?? (stop === null ? 'running' : '—');
   const numPoints = start.num_points ?? start.num;
 
