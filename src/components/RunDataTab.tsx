@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { formatDateTimeISO8601 } from '../utils/dateFormatter';
 
 type Props = {
   serverUrl: string;
@@ -197,7 +198,7 @@ useEffect(() => {
 
   const formatCell = (col: string, v: unknown) =>
     col === 'time' && typeof v === 'number'
-      ? new Date(v * 1000).toLocaleString(undefined, { timeZoneName: 'short' })
+      ? formatDateTimeISO8601(v)
       : typeof v === 'number'
         ? (Number.isInteger(v) ? String(v) : v.toPrecision(6))
         : String(v ?? '');

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { formatDateTimeISO8601 } from '../utils/dateFormatter';
 
 type RunRow = {
   id: string;
@@ -63,9 +64,7 @@ function parseRun(item: Record<string, unknown>): RunRow {
     : (start.axes && typeof start.axes === 'object' ? Object.keys(start.axes) : []);
   // Same plans also leave start.detectors empty but populate start.hints.detectors.
   const displayDetectors = detectorList.length > 0 ? detectorList : hintsDetectorList;
-  const date = start.time
-    ? new Date(start.time * 1000).toLocaleString()
-    : undefined;
+  const date = formatDateTimeISO8601(start.time) !== '—' ? formatDateTimeISO8601(start.time) : undefined;
   return {
     id:           String(item.id ?? ''),
     scanId:       start.scan_id,
@@ -297,16 +296,16 @@ export default function RunTable({ serverUrl, catalog, page, selectedRunId, auto
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterKey, sortDesc]);
 
-  useEffect(() => {
-    if (!serverUrl || catalog === null) { setRuns([]); setTotal(0); setLoading(false); return; }
-    if (keyPrefix === null) { setLoading(true); return; }
-    let cancelled = false;
-    const isBg = bgRefreshRef.current;
-    bgRefreshRef.current = false;
-    const adoptLoading = isBg && loadingRef.current;
-    if (!isBg) { setLoading(true); setFilterError(''); loadingRef.current = true; }
+   useEffect(() => {
+     if (!serverUrl || catalog === null) { setRuns([]); setTotal(0); setLoading(false); return; }
+     if (keyPrefix === null) { setLoading(true); return; }
+     let cancelled = false;
+     const isBg = bgRefreshRef.current;
+     bgRefreshRef.current = false;
+     const adoptLoading = isBg && loadingRef.current;
+     if (!isBg) { setLoading(true); setFilterError(''); loadingRef.current = true; }
 
-    const extra = buildFilterQs(debouncedFilters, keyPrefix);
+     const extra = buildFilterQs(debouncedFilters, keyPrefix);
 
     (async () => {
       try {
