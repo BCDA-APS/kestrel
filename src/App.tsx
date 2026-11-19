@@ -10,11 +10,35 @@ import QServerPanel from './components/QServerPanel';
 import GridScanPanel from './components/GridScanPanel';
 import GridScan1DPanel from './components/GridScan1DPanel';
 import ImagePanel from './components/ImagePanel';
-import type { Panel, XYTrace, TraceStyle } from './types';
+import type { Panel, XYTrace, TraceStyle, CursorPersistenceMode } from './types';
 import { DEFAULT_TRACE_STYLE } from './constants';
 import { assignTraceAxes, matchesDev, matchesToken, selectPlotStream } from './utils/fieldUtils';
 import { fitData, MODEL_NAMES } from './fitting';
 import type { FitResult } from './fitting';
+
+// localStorage helpers for cursor persistence preference
+const CURSOR_PREF_KEY = 'kestrel:cursorPersistenceMode';
+const DEFAULT_CURSOR_MODE: CursorPersistenceMode = 'keep';
+
+function loadCursorPreference(): CursorPersistenceMode {
+  try {
+    const saved = localStorage.getItem(CURSOR_PREF_KEY);
+    if (saved && ['always-clear', 'clear-on-axis-change', 'keep'].includes(saved)) {
+      return saved as CursorPersistenceMode;
+    }
+  } catch {
+    // localStorage may be unavailable; fall back to default
+  }
+  return DEFAULT_CURSOR_MODE;
+}
+
+function saveCursorPreference(mode: CursorPersistenceMode) {
+  try {
+    localStorage.setItem(CURSOR_PREF_KEY, mode);
+  } catch {
+    // localStorage may be unavailable; silently fail
+  }
+}
 
 function computeDerivative(xs: number[], ys: number[], w: number): { x: number[]; y: number[] } {
   if (xs.length < 2) return { x: [], y: [] };
@@ -312,6 +336,8 @@ export default function App() {
   const [cursor2Y, setCursor2Y] = useState<number | null>(null);
   const [snapToData, setSnapToData] = useState(true);
   const [fitBetweenCursors, setFitBetweenCursors] = useState(false);
+  const [cursorPersistenceMode, setCursorPersistenceMode] = useState<CursorPersistenceMode>(() => loadCursorPreference());
+  const [previousXAxisLabel, setPreviousXAxisLabel] = useState<string | null>(null);
   const fieldSelectorRef = useRef<FieldSelectorHandle>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const [addRunId, setAddRunId] = useState<string | null>(null);
@@ -427,6 +453,39 @@ export default function App() {
       runId: `__deriv__:${derivSource.runId}`,
     }]);
   }, [showDerivative, smoothingWindow, derivSource]);
+
+  // Handle cursor persistence when switching between XY plots
+  useEffect(() => {
+    if (panel?.type !== 'xy' || realTraces.length === 0) return;
+
+    const currentXAxisLabel = realTraces[0]?.xLabel ?? null;
+
+    if (previousXAxisLabel === null) {
+      // First time: just record the X-axis label
+      setPreviousXAxisLabel(currentXAxisLabel);
+      return;
+    }
+
+    // Check if X-axis changed and apply cursor persistence preference
+    if (currentXAxisLabel !== previousXAxisLabel) {
+      if (cursorPersistenceMode === 'always-clear') {
+        // Always clear cursors
+        setCursor1(null);
+        setCursor1Y(null);
+        setCursor2(null);
+        setCursor2Y(null);
+      } else if (cursorPersistenceMode === 'clear-on-axis-change') {
+        // Clear only when X-axis signal changes
+        setCursor1(null);
+        setCursor1Y(null);
+        setCursor2(null);
+        setCursor2Y(null);
+      }
+      // 'keep' mode: do nothing
+    }
+
+    setPreviousXAxisLabel(currentXAxisLabel);
+  }, [realTraces, cursorPersistenceMode, previousXAxisLabel, panel?.type]);
 
   const allTraces = [...realTraces, ...derivativeTraces];
   const activeTrace = allTraces[Math.min(activeTraceIndex, allTraces.length - 1)] ?? null;
@@ -1527,27 +1586,28 @@ export default function App() {
               className={`flex-none bg-white overflow-hidden flex flex-col border-l border-gray-100 transition-opacity${analysisDisabled ? ' opacity-40 pointer-events-none' : ''}`}
               style={{ width: analysisCollapsed ? 0 : analysisWidth }}
             >
-              <AnalysisPanel
-                position="right" onTogglePosition={() => setAnalysisPosition('bottom')}
-                xLog={xLog} yLog={yLog} onXLogChange={setXLog} onYLogChange={setYLog}
-                hasXYPanel={panel?.type === 'xy'}
-                xyTraces={panel?.type === 'xy' ? allTraces.map(t => t.runId.startsWith('__deriv__') ? t.yLabel : `${t.runLabel} (${t.runId.slice(0, 7)}) - ${t.yLabel}`) : []}
-                activeTraceIndex={activeTraceIndex} onActiveTraceIndexChange={handleActiveTraceIndexChange}
-                activeX={activeTrace?.x ?? []} activeY={activeTrace?.y ?? []}
-                showDerivative={showDerivative} onShowDerivativeChange={setShowDerivative}
-                smoothingWindow={smoothingWindow} onSmoothingWindowChange={setSmoothingWindow}
-                fitModel={fitModel} onFitModelChange={m => { setFitModel(m); localStorage.setItem('fitModel', m); setFitResults(null); }}
-                fitResults={fitResults} onFit={handleFit} onClearFit={() => setFitResults(null)}
-                cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y}
-                snapToData={snapToData} fitBetweenCursors={fitBetweenCursors}
-                onSnapToDataChange={setSnapToData}
-                onFitBetweenCursorsChange={setFitBetweenCursors}
-                onClearCursor1={() => { setCursor1(null); setCursor1Y(null); }}
-                onClearCursor2={() => { setCursor2(null); setCursor2Y(null); }}
-                onClearAllCursors={() => { setCursor1(null); setCursor1Y(null); setCursor2(null); setCursor2Y(null); }}
-                traceStyles={traceStyles} onTraceStyleChange={handleTraceStyleChange}
-                showWaterfall={showWaterfall} onShowWaterfallChange={setShowWaterfall} waterfallOffset={waterfallOffset} onWaterfallOffsetChange={setWaterfallOffset}
-              />
+               <AnalysisPanel
+                 position="right" onTogglePosition={() => setAnalysisPosition('bottom')}
+                 xLog={xLog} yLog={yLog} onXLogChange={setXLog} onYLogChange={setYLog}
+                 hasXYPanel={panel?.type === 'xy'}
+                 xyTraces={panel?.type === 'xy' ? allTraces.map(t => t.runId.startsWith('__deriv__') ? t.yLabel : `${t.runLabel} (${t.runId.slice(0, 7)}) - ${t.yLabel}`) : []}
+                 activeTraceIndex={activeTraceIndex} onActiveTraceIndexChange={handleActiveTraceIndexChange}
+                 activeX={activeTrace?.x ?? []} activeY={activeTrace?.y ?? []}
+                 showDerivative={showDerivative} onShowDerivativeChange={setShowDerivative}
+                 smoothingWindow={smoothingWindow} onSmoothingWindowChange={setSmoothingWindow}
+                 fitModel={fitModel} onFitModelChange={m => { setFitModel(m); localStorage.setItem('fitModel', m); setFitResults(null); }}
+                 fitResults={fitResults} onFit={handleFit} onClearFit={() => setFitResults(null)}
+                 cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y}
+                 snapToData={snapToData} fitBetweenCursors={fitBetweenCursors}
+                 onSnapToDataChange={setSnapToData}
+                 onFitBetweenCursorsChange={setFitBetweenCursors}
+                 onClearCursor1={() => { setCursor1(null); setCursor1Y(null); }}
+                 onClearCursor2={() => { setCursor2(null); setCursor2Y(null); }}
+                 onClearAllCursors={() => { setCursor1(null); setCursor1Y(null); setCursor2(null); setCursor2Y(null); }}
+                 cursorPersistenceMode={cursorPersistenceMode} onCursorPersistenceModeChange={(mode) => { setCursorPersistenceMode(mode); saveCursorPreference(mode); }}
+                 traceStyles={traceStyles} onTraceStyleChange={handleTraceStyleChange}
+                 showWaterfall={showWaterfall} onShowWaterfallChange={setShowWaterfall} waterfallOffset={waterfallOffset} onWaterfallOffsetChange={setWaterfallOffset}
+               />
             </aside>
           </>
         ) : (
@@ -1636,26 +1696,27 @@ export default function App() {
               style={{ height: analysisCollapsed ? 0 : analysisHeight }}
             >
               <AnalysisPanel
-                position="bottom" onTogglePosition={() => setAnalysisPosition('right')}
-                xLog={xLog} yLog={yLog} onXLogChange={setXLog} onYLogChange={setYLog}
-                hasXYPanel={panel?.type === 'xy'}
-                xyTraces={panel?.type === 'xy' ? allTraces.map(t => t.runId.startsWith('__deriv__') ? t.yLabel : `${t.runLabel} (${t.runId.slice(0, 7)}) - ${t.yLabel}`) : []}
-                activeTraceIndex={activeTraceIndex} onActiveTraceIndexChange={handleActiveTraceIndexChange}
-                activeX={activeTrace?.x ?? []} activeY={activeTrace?.y ?? []}
-                showDerivative={showDerivative} onShowDerivativeChange={setShowDerivative}
-                smoothingWindow={smoothingWindow} onSmoothingWindowChange={setSmoothingWindow}
-                fitModel={fitModel} onFitModelChange={m => { setFitModel(m); localStorage.setItem('fitModel', m); setFitResults(null); }}
-                fitResults={fitResults} onFit={handleFit} onClearFit={() => setFitResults(null)}
-                cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y}
-                snapToData={snapToData} fitBetweenCursors={fitBetweenCursors}
-                onSnapToDataChange={setSnapToData}
-                onFitBetweenCursorsChange={setFitBetweenCursors}
-                onClearCursor1={() => { setCursor1(null); setCursor1Y(null); }}
-                onClearCursor2={() => { setCursor2(null); setCursor2Y(null); }}
-                onClearAllCursors={() => { setCursor1(null); setCursor1Y(null); setCursor2(null); setCursor2Y(null); }}
-                traceStyles={traceStyles} onTraceStyleChange={handleTraceStyleChange}
-                showWaterfall={showWaterfall} onShowWaterfallChange={setShowWaterfall} waterfallOffset={waterfallOffset} onWaterfallOffsetChange={setWaterfallOffset}
-              />
+                 position="bottom" onTogglePosition={() => setAnalysisPosition('right')}
+                 xLog={xLog} yLog={yLog} onXLogChange={setXLog} onYLogChange={setYLog}
+                 hasXYPanel={panel?.type === 'xy'}
+                 xyTraces={panel?.type === 'xy' ? allTraces.map(t => t.runId.startsWith('__deriv__') ? t.yLabel : `${t.runLabel} (${t.runId.slice(0, 7)}) - ${t.yLabel}`) : []}
+                 activeTraceIndex={activeTraceIndex} onActiveTraceIndexChange={handleActiveTraceIndexChange}
+                 activeX={activeTrace?.x ?? []} activeY={activeTrace?.y ?? []}
+                 showDerivative={showDerivative} onShowDerivativeChange={setShowDerivative}
+                 smoothingWindow={smoothingWindow} onSmoothingWindowChange={setSmoothingWindow}
+                 fitModel={fitModel} onFitModelChange={m => { setFitModel(m); localStorage.setItem('fitModel', m); setFitResults(null); }}
+                 fitResults={fitResults} onFit={handleFit} onClearFit={() => setFitResults(null)}
+                 cursor1={cursor1} cursor2={cursor2} cursor1Y={cursor1Y} cursor2Y={cursor2Y}
+                 snapToData={snapToData} fitBetweenCursors={fitBetweenCursors}
+                 onSnapToDataChange={setSnapToData}
+                 onFitBetweenCursorsChange={setFitBetweenCursors}
+                 onClearCursor1={() => { setCursor1(null); setCursor1Y(null); }}
+                 onClearCursor2={() => { setCursor2(null); setCursor2Y(null); }}
+                 onClearAllCursors={() => { setCursor1(null); setCursor1Y(null); setCursor2(null); setCursor2Y(null); }}
+                 cursorPersistenceMode={cursorPersistenceMode} onCursorPersistenceModeChange={(mode) => { setCursorPersistenceMode(mode); saveCursorPreference(mode); }}
+                 traceStyles={traceStyles} onTraceStyleChange={handleTraceStyleChange}
+                 showWaterfall={showWaterfall} onShowWaterfallChange={setShowWaterfall} waterfallOffset={waterfallOffset} onWaterfallOffsetChange={setWaterfallOffset}
+               />
             </aside>
           </div>
         )}

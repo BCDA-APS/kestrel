@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { MODEL_NAMES } from '../fitting';
 import type { FitResult } from '../fitting';
-import type { TraceStyle } from '../types';
+import type { TraceStyle, CursorPersistenceMode } from '../types';
 import { PLOTLY_COLORS, MARKER_ICONS, CURSOR_COLORS, DEFAULT_TRACE_STYLE } from '../constants';
 
 type AnalysisPanelProps = {
@@ -38,6 +38,8 @@ type AnalysisPanelProps = {
   onClearCursor1: () => void;
   onClearCursor2: () => void;
   onClearAllCursors: () => void;
+  cursorPersistenceMode: CursorPersistenceMode;
+  onCursorPersistenceModeChange: (mode: CursorPersistenceMode) => void;
   // Style (per active trace)
   traceStyles: TraceStyle[];
   onTraceStyleChange: (i: number, patch: Partial<TraceStyle>) => void;
@@ -212,6 +214,7 @@ export default function AnalysisPanel({
   snapToData, fitBetweenCursors,
   onSnapToDataChange, onFitBetweenCursorsChange,
   onClearCursor1, onClearCursor2, onClearAllCursors,
+  cursorPersistenceMode, onCursorPersistenceModeChange,
   traceStyles, onTraceStyleChange,
   showWaterfall, onShowWaterfallChange, waterfallOffset, onWaterfallOffsetChange,
 }: AnalysisPanelProps) {
@@ -479,7 +482,28 @@ export default function AnalysisPanel({
               C1 → Right click<br />
               C2 → Middle click or Alt+Right click
             </p>
-            <label className="flex items-center gap-2 cursor-pointer select-none">
+            {/* Cursor persistence preference */}
+            <div className="mt-2 pt-2 border-t border-gray-100">
+              <span className="text-xs font-semibold text-gray-600 mb-1.5 block">When switching runs:</span>
+              {(['always-clear', 'clear-on-axis-change', 'keep'] as const).map(mode => (
+                <label key={mode} className="flex items-center gap-2 cursor-pointer select-none mb-1">
+                  <input
+                    type="radio"
+                    name="cursor-persistence"
+                    value={mode}
+                    checked={cursorPersistenceMode === mode}
+                    onChange={() => onCursorPersistenceModeChange(mode)}
+                    className="accent-sky-600 w-3.5 h-3.5"
+                  />
+                  <span className="text-xs text-gray-700">
+                    {mode === 'always-clear' && 'Always clear cursors'}
+                    {mode === 'clear-on-axis-change' && 'Clear if X-axis signal changes'}
+                    {mode === 'keep' && 'Keep cursors'}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer select-none mt-2">
               <input
                 type="checkbox"
                 checked={snapToData}
