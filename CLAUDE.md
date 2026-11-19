@@ -59,3 +59,9 @@ IT-managed host (`watt.aps.anl.gov`), so expect that file to change.
 
 Largely AI-assisted. Treat the code as readable and conventional rather than as
 carrying deep hidden intent, and prefer verifying behaviour over inferring it.
+
+## Feature branches
+
+All work on issues or features must be on a dedicated feature branch unless
+otherwise specified. Branch naming: `<issue-number>-<concise-title>` with
+hyphens as delimiters. Example: `14-15-cursor-button-visibility`.
