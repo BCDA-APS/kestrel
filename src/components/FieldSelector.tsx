@@ -34,6 +34,12 @@ type FieldSelectorProps = {
   onImageOpen?: (fieldName: string, stream: string, dataSubNode: string, shape: number[]) => void;
   /** Dichro mode: when true, auto-selects dichro_monitor stream and dichro_xmcd detector whenever available */
   dichroMode?: boolean;
+  /** When adding to existing plot: preferred stream name (auto-select if available) */
+  preferredStream?: string;
+  /** When adding to existing plot: preferred X-axis field name (auto-select if available) */
+  preferredXField?: string;
+  /** When adding to existing plot: preferred Y-axis field names (auto-select if available) */
+  preferredYFields?: string[];
 };
 
 export type FieldSelectorHandle = { schedulePlot: () => void; scheduleLive: () => void; removeY: (yLabel: string) => void; scheduleImageOpen: () => void; schedulePlotOnLoad: (runId: string) => void; scheduleGridPlot: (runId: string) => void };
@@ -43,8 +49,10 @@ const catSeg = (c: string | null) => c ? `/${c}` : '';
 const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(function FieldSelector({
   serverUrl, catalog, runId, runLabel,
   runDetectors, runHintsDetectors = [], detectorDefault = 'smart', runMotors, runAcquiring,
-  onPlot, onAddTraces, onAddTracesRight, onLivePlot, onRemoveRunTraces, onZSelect, onGridPlot, onGrid1DPlot, onImageOpen,
+  onPlot, onAddTraces, onAddTracesRight: _, // Y1/Y2 columns handle axis assignment; kept for backward compatibility
+  onLivePlot, onRemoveRunTraces, onZSelect, onGridPlot, onGrid1DPlot, onImageOpen,
   dichroMode = true,
+  preferredStream, preferredXField, preferredYFields,
 }, ref) {
   const zMode = !!onZSelect;
   // A field is a 2D image if it has ≥2 shape dimensions with the last two both > 1
@@ -54,7 +62,8 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   const [selectedStream, setSelectedStream] = useState('');
   const [fields, setFields] = useState<FieldInfo[]>([]);
   const [xField, setXField] = useState('');
-  const [yFields, setYFields] = useState<string[]>([]);
+  const [y1Fields, setY1Fields] = useState<string[]>([]);
+  const [y2Fields, setY2Fields] = useState<string[]>([]);
   const [i0Field, setI0Field] = useState('');
   const [loading, setLoading] = useState(false);
   const [flashSuccess, setFlashSuccess] = useState(false);
@@ -65,7 +74,8 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   // k-varying hkl_scan would carry over to the next l-varying scan even when
   // the auto-picker would do better.
   const lastXRunIdRef = useRef('');
-  const lastYRef = useRef<string[]>([]);
+  const lastY1Ref = useRef<string[]>([]);
+  const lastY2Ref = useRef<string[]>([]);
   const lastManualStreamRef = useRef('');
   // Tracks which runId the current `fields` were loaded for; prevents stale-fields auto-select
   const fieldsRunIdRef = useRef('');
@@ -150,6 +160,11 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
         const names: string[] = (json.data ?? []).map((item: any) => item.id);
         const nonBaseline = names.filter(n => n !== 'baseline');
         setStreams(nonBaseline);
+        // When adding to existing plot: prefer the explicitly provided stream
+        if (preferredStream && nonBaseline.includes(preferredStream)) {
+          setSelectedStream(preferredStream);
+          return;
+        }
         // Dichro mode: always prefer dichro_monitor when available, regardless of last manual choice
         if (dichroMode && nonBaseline.includes('dichro_monitor')) {
           setSelectedStream('dichro_monitor');
@@ -169,7 +184,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [serverUrl, catalog, runId, dichroMode]);
+  }, [serverUrl, catalog, runId, dichroMode, preferredStream]);
 
   const fetchFields = useCallback(() => {
     if (!selectedStream) return;
@@ -366,20 +381,41 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fields, runDetectors, runMotors]);
 
-  // Auto-preselect X and Y: restore last user selection if it exists, else fall back to defaults
+   // Auto-preselect X and Y1/Y2: restore last user selection if it exists, else fall back to defaults
   useEffect(() => {
-    if (fieldsRunIdRef.current !== runId) { setYFields([]); setXField(''); return; }
+    if (fieldsRunIdRef.current !== runId) { setY1Fields([]); setY2Fields([]); setXField(''); return; }
     if (sortedFields.length === 0) return;
     const fieldNames = new Set(sortedFields.map(f => f.name));
 
-    // Dichro mode: when dichro_monitor is active, always default to dichro_positioner1 (X) + dichro fields (Y/Z)
-    // In z-mode (grid): xmcd first so it becomes the Z field; in 1D: xas first, both shown
+    // Check for valid last selections first (user manually selected fields on this run)
+    const validLastY1 = lastY1Ref.current.filter(y => fieldNames.has(y));
+    const validLastY2 = lastY2Ref.current.filter(y => fieldNames.has(y));
+    const hasValidLastSelection = validLastY1.length > 0 || validLastY2.length > 0;
+
+    // When adding to existing plot: prefer the explicitly provided X and Y fields, but only if no manual selection yet
+    if (!hasValidLastSelection && preferredXField && preferredYFields && preferredYFields.length > 0) {
+      if (fieldNames.has(preferredXField) && preferredYFields.every(y => fieldNames.has(y))) {
+        setXField(preferredXField);
+        // Auto-assign new Y signals to Y1 by default
+        setY1Fields(preferredYFields);
+        setY2Fields([]);
+        return;
+      }
+    }
+
+    // Dichro mode: when dichro_monitor is active, always default to dichro_positioner1 (X) + dichro fields (Y1/Y2)
+    // In z-mode (grid): xmcd first so it becomes the Z field; in 1D: xas first (Y1), xmcd (Y2)
     if (dichroMode && selectedStream === 'dichro_monitor' && fieldNames.has('dichro_xmcd')) {
       if (fieldNames.has('dichro_positioner1')) setXField('dichro_positioner1');
-      const order = zMode
-        ? (['dichro_xmcd', 'dichro_xas'] as const)
-        : (['dichro_xas', 'dichro_xmcd'] as const);
-      setYFields(order.filter(f => fieldNames.has(f)));
+      if (zMode) {
+        // In z-mode, only one Y field for Z selection
+        setY1Fields(fieldNames.has('dichro_xmcd') ? ['dichro_xmcd'] : []);
+        setY2Fields([]);
+      } else {
+        // In 1D mode: xas on Y1, xmcd on Y2
+        setY1Fields(fieldNames.has('dichro_xas') ? ['dichro_xas'] : []);
+        setY2Fields(fieldNames.has('dichro_xmcd') ? ['dichro_xmcd'] : []);
+      }
       return;
     }
 
@@ -462,13 +498,21 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
       }
     }
 
-    const validLastY = lastYRef.current.filter(y => fieldNames.has(y));
     const hasImageFields = sortedFields.some(isImageField);
     const isNumeric = (f: FieldInfo) => !['S', 'U', 'string'].includes(f.dtype);
 
-    if (detectorDefault === 'last' && validLastY.length > 0) {
-      setYFields(validLastY);
-    } else if (detectorDefault === 'hints' || (detectorDefault === 'smart' && validLastY.length === 0)) {
+    // If user has manually selected fields on this run, always restore them
+    if (hasValidLastSelection) {
+      lastY1Ref.current = validLastY1;
+      lastY2Ref.current = validLastY2;
+      setY1Fields(validLastY1);
+      setY2Fields(validLastY2);
+    } else if (detectorDefault === 'last' && validLastY1.length > 0) {
+      lastY1Ref.current = validLastY1;
+      lastY2Ref.current = validLastY2;
+      setY1Fields(validLastY1);
+      setY2Fields(validLastY2);
+    } else if (detectorDefault === 'hints' || (detectorDefault === 'smart' && validLastY1.length === 0)) {
       // Prefer hints detectors; fall back to full detector list
       const hintsDets = runHintsDetectors.length > 0 ? runHintsDetectors : runDetectors;
       const hintsNonImageDet = sortedFields.find(f => !isImageField(f) && isNumeric(f) && matchesDev(f.name, hintsDets) && !matchesDev(f.name, runMotors));
@@ -477,46 +521,54 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
         hintsNonImageDet ??
         sortedFields.find(f => !isImageField(f) && isNumeric(f) && matchesDev(f.name, runDetectors) && !matchesDev(f.name, runMotors)) ??
         sortedFields.find(f => matchesDev(f.name, runDetectors));
-      setYFields(firstDet ? [firstDet.name] : []);
-    } else if (validLastY.length > 0) {
-      setYFields(validLastY);
+      // Auto-assign new signals to Y1 by default
+      const newY1 = firstDet ? [firstDet.name] : [];
+      lastY1Ref.current = newY1;
+      lastY2Ref.current = [];
+      setY1Fields(newY1);
+      setY2Fields([]);
     } else {
       // last mode with no prior selection: fall back to first available detector
       const firstDet = hasImageFields ? undefined :
         sortedFields.find(f => !isImageField(f) && isNumeric(f) && matchesDev(f.name, runDetectors) && !matchesDev(f.name, runMotors)) ??
         sortedFields.find(f => matchesDev(f.name, runDetectors) && !matchesDev(f.name, runMotors) && isNumeric(f)) ??
         sortedFields.find(f => matchesDev(f.name, runDetectors));
-      setYFields(firstDet ? [firstDet.name] : []);
+      // Auto-assign new signals to Y1 by default
+      const newY1 = firstDet ? [firstDet.name] : [];
+      lastY1Ref.current = newY1;
+      lastY2Ref.current = [];
+      setY1Fields(newY1);
+      setY2Fields([]);
     }
     return () => { xPickCancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortedFields, runMotors, runDetectors, runHintsDetectors, detectorDefault, runId, dichroMode, selectedStream, zMode]);
+  }, [sortedFields, runMotors, runDetectors, runHintsDetectors, detectorDefault, runId, dichroMode, selectedStream, zMode, preferredXField, preferredYFields]);
 
-  // In z-mode, emit the selected field whenever yFields[0] changes (auto-select or user click)
+  // In z-mode, emit the selected field whenever y1Fields[0] changes (auto-select or user click)
   useEffect(() => {
-    if (zMode && yFields.length > 0) onZSelect?.(yFields[0]);
+    if (zMode && y1Fields.length > 0) onZSelect?.(y1Fields[0]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [zMode, yFields]);
+  }, [zMode, y1Fields]);
 
   const selectXField = (name: string) => {
     lastXRef.current = name;
     lastXWasMotorRef.current = matchesDev(name, runMotors);
     lastXRunIdRef.current = runId;
     setXField(name);
-    if (onAddTraces) handlePlot(name, yFields);
+    if (onAddTraces) handlePlot(name, y1Fields, y2Fields);
   };
 
-  const toggleYField = (name: string) => {
-    const next = yFields.includes(name) ? yFields.filter(n => n !== name) : [...yFields, name];
-    lastYRef.current = next;
-    setYFields(next);
+  const toggleY1Field = (name: string) => {
+    const next = y1Fields.includes(name) ? y1Fields.filter(n => n !== name) : [...y1Fields, name];
+    lastY1Ref.current = next;
+    setY1Fields(next);
     if (runAcquiring && onLivePlot) {
       // During live acquisition: re-trigger live plot with new selection; never remove traces
-      if (next.length > 0) setPendingAction('live');
+      if (next.length > 0 || y2Fields.length > 0) setPendingAction('live');
     } else if (onAddTraces || removedTracesRef.current) {
-      if (next.length > 0) {
+      if (next.length > 0 || y2Fields.length > 0) {
         removedTracesRef.current = false;
-        handlePlot(xField, next);
+        handlePlot(xField, next, y2Fields);
       } else {
         removedTracesRef.current = true;
         onRemoveRunTraces?.(runId);
@@ -524,11 +576,53 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     }
   };
 
+  const toggleY2Field = (name: string) => {
+    const next = y2Fields.includes(name) ? y2Fields.filter(n => n !== name) : [...y2Fields, name];
+    lastY2Ref.current = next;
+    setY2Fields(next);
+    if (runAcquiring && onLivePlot) {
+      // During live acquisition: re-trigger live plot with new selection; never remove traces
+      if (y1Fields.length > 0 || next.length > 0) setPendingAction('live');
+    } else if (onAddTraces || removedTracesRef.current) {
+      if (y1Fields.length > 0 || next.length > 0) {
+        removedTracesRef.current = false;
+        handlePlot(xField, y1Fields, next);
+      } else {
+        removedTracesRef.current = true;
+        onRemoveRunTraces?.(runId);
+      }
+    }
+  };
+
+  const selectAllY1 = () => {
+    const allFields = sortedFields.filter(f => !onImageOpen || !isImageField(f)).map(f => f.name);
+    lastY1Ref.current = allFields;
+    setY1Fields(allFields);
+  };
+
+  const deselectAllY1 = () => {
+    lastY1Ref.current = [];
+    setY1Fields([]);
+  };
+
+  const selectAllY2 = () => {
+    const allFields = sortedFields.filter(f => !onImageOpen || !isImageField(f)).map(f => f.name);
+    lastY2Ref.current = allFields;
+    setY2Fields(allFields);
+  };
+
+  const deselectAllY2 = () => {
+    lastY2Ref.current = [];
+    setY2Fields([]);
+  };
+
   const applyI0 = (y: number[], i0: number[]): number[] =>
     y.map((v, i) => (i0[i] !== 0 && i0[i] != null ? v / i0[i] : v));
 
-  const fetchAllTraces = async (x: string, ys: string[], i0 = i0Field): Promise<XYTrace[]> => {
+  const fetchAllTraces = async (x: string, y1s: string[], y2s: string[], i0 = i0Field): Promise<XYTrace[]> => {
     const subPath = dataSubNode ? `/${dataSubNode}` : '';
+    const allYs = [...y1s, ...y2s];
+    
     if (dataNodeFamily === 'table') {
       const resp = await fetch(`${serverUrl}/api/v1/table/full${catSeg(catalog)}/${runId}/${selectedStream}${subPath}?format=application/json`);
       if (resp.ok) {
@@ -536,12 +630,24 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
         const seqNums: number[] = table.seq_num ?? [];
         const nRows = seqNums.length > 0 ? (seqNums.findIndex(s => s === 0) === -1 ? seqNums.length : seqNums.findIndex(s => s === 0)) : undefined;
         const i0Data: number[] = i0 ? (nRows !== undefined ? (table[i0] ?? []).slice(0, nRows) : (table[i0] ?? [])) : [];
-        return ys.map(yf => {
+        const xArr = nRows !== undefined ? (table[x] ?? []).slice(0, nRows) : (table[x] ?? []);
+        
+        // Y1 traces: apply I0 normalization (always set rawYLabel to mark as Y1)
+        const y1Traces = y1s.map(yf => {
           let yArr: number[] = nRows !== undefined ? (table[yf] ?? []).slice(0, nRows) : (table[yf] ?? []);
-          const xArr = nRows !== undefined ? (table[x] ?? []).slice(0, nRows) : (table[x] ?? []);
           if (i0 && i0Data.length > 0) yArr = applyI0(yArr, i0Data);
-          return { x: xArr, y: yArr, xLabel: x, yLabel: i0 ? `${yf}/I0` : yf, ...(i0 ? { rawYLabel: yf, i0Label: i0 } : {}), runLabel, runId };
+          const trace: any = { x: xArr, y: yArr, xLabel: x, yLabel: i0 ? `${yf}/I0` : yf, rawYLabel: yf, runLabel, runId };
+          if (i0) trace.i0Label = i0;
+          return trace;
         });
+        
+        // Y2 traces: no normalization
+        const y2Traces = y2s.map(yf => {
+          const yArr: number[] = nRows !== undefined ? (table[yf] ?? []).slice(0, nRows) : (table[yf] ?? []);
+          return { x: xArr, y: yArr, xLabel: x, yLabel: yf, runLabel, runId };
+        });
+        
+        return [...y1Traces, ...y2Traces];
       }
       // table/full failed — fall through to per-column array fetches
     }
@@ -554,7 +660,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     const baseDefault = `${serverUrl}/api/v1/array/full${catSeg(catalog)}/${runId}/${selectedStream}${subPath}`;
     const baseFor = (name: string) => fieldNodeMap.get(name) ?? baseDefault;
 
-    const yResps = await Promise.all(ys.map(yf => fetch(`${baseFor(yf)}/${yf}?format=application/json`)));
+    const yResps = await Promise.all(allYs.map(yf => fetch(`${baseFor(yf)}/${yf}?format=application/json`)));
     if (yResps.some(r => !r.ok)) throw new Error('Fetch failed');
     const yDatas: number[][] = await Promise.all(yResps.map(r => r.json()));
     const xResp = await fetch(`${baseFor(x)}/${x}?format=application/json`);
@@ -565,22 +671,49 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
       const i0Resp = await fetch(`${baseFor(i0)}/${i0}?format=application/json`);
       if (i0Resp.ok) i0Data = await i0Resp.json();
     }
-    return ys.map((yf, idx) => {
+    
+    // Y1 traces: apply I0 normalization (always set rawYLabel to mark as Y1)
+    const y1Traces = y1s.map((yf, idx) => {
       const y = i0 && i0Data.length > 0 ? applyI0(yDatas[idx], i0Data) : yDatas[idx];
-      return { x: xData, y, xLabel: x, yLabel: i0 ? `${yf}/I0` : yf, ...(i0 ? { rawYLabel: yf, i0Label: i0 } : {}), runLabel, runId };
+      const trace: any = { x: xData, y, xLabel: x, yLabel: i0 ? `${yf}/I0` : yf, rawYLabel: yf, runLabel, runId };
+      if (i0) trace.i0Label = i0;
+      return trace;
     });
+    
+    // Y2 traces: no normalization
+    const y2Traces = y2s.map((yf, idx) => {
+      const y = yDatas[y1s.length + idx];
+      return { x: xData, y, xLabel: x, yLabel: yf, runLabel, runId };
+    });
+    
+    return [...y1Traces, ...y2Traces];
   };
 
-  const handlePlot = async (x = xField, ys = yFields, i0 = i0Field) => {
-    if (!x || ys.length === 0 || adding) return;
+  const handlePlot = async (x = xField, y1s = y1Fields, y2s = y2Fields, i0 = i0Field) => {
+    if (!x || (y1s.length === 0 && y2s.length === 0) || adding) return;
     setAdding(true);
     setError('');
     try {
-      const traces = await fetchAllTraces(x, ys, i0);
-      const title = ys.length === 1 ? `${ys[0]} vs ${x}` : `${ys.join(', ')} vs ${x}`;
+      const traces = await fetchAllTraces(x, y1s, y2s, i0);
+      const allYs = [...y1s, ...y2s];
+      const title = allYs.length === 1 ? `${allYs[0]} vs ${x}` : `${allYs.join(', ')} vs ${x}`;
       onPlot(traces, title);
     } catch (e) {
       console.error('Plot failed:', e);
+      setError('Failed to fetch data');
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleAddTracesPlot = async () => {
+    if (!xField || (y1Fields.length === 0 && y2Fields.length === 0) || adding || !onAddTraces) return;
+    setAdding(true);
+    setError('');
+    try {
+      const traces = await fetchAllTraces(xField, y1Fields, y2Fields);
+      onAddTraces(traces);
+    } catch {
       setError('Failed to fetch data');
     } finally {
       setAdding(false);
@@ -630,11 +763,11 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
 
   // Fire plot/live once fields are ready; guard live against non-primary stream
   useEffect(() => {
-    if (!loading && xField && yFields.length > 0) {
+    if (!loading && xField && (y1Fields.length > 0 || y2Fields.length > 0)) {
       if (pendingGridPlot && pendingGridPlot === runId && zMode && onGridPlot) {
         // Grid plot: fires after zMode=true so auto-select has picked the right field order.
         // Emit the current Z field before opening so gridZField is set correctly.
-        onZSelect?.(yFields[0]);
+        onZSelect?.(y1Fields[0]);
         setPendingGridPlot(null);
         onGridPlot(selectedStream);
       } else if (pendingAction) {
@@ -649,7 +782,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingGridPlot, pendingAction, loading, xField, yFields, selectedStream, zMode]);
+  }, [pendingGridPlot, pendingAction, loading, xField, y1Fields, y2Fields, selectedStream, zMode]);
 
   useImperativeHandle(ref, () => ({
     schedulePlot: () => setPendingAction('plot'),
@@ -657,9 +790,14 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     schedulePlotOnLoad: (id: string) => { pendingPlotOnLoadRef.current = id; },
     scheduleGridPlot: (id: string) => { setPendingGridPlot(id); },
     removeY: (yLabel: string) => {
-      setYFields(prev => {
+      setY1Fields(prev => {
         const next = prev.filter(y => y !== yLabel);
-        lastYRef.current = next;
+        lastY1Ref.current = next;
+        return next;
+      });
+      setY2Fields(prev => {
+        const next = prev.filter(y => y !== yLabel);
+        lastY2Ref.current = next;
         return next;
       });
     },
@@ -709,14 +847,15 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
   }, [runAcquiring, dataNodeFamily, dataSubNode, selectedStream, fields.length, serverUrl, catalog, runId, pendingAction]);
 
   const handleLivePlot = async () => {
-    if (!xField || yFields.length === 0 || adding || !onLivePlot) return;
+    if (!xField || (y1Fields.length === 0 && y2Fields.length === 0) || adding || !onLivePlot) return;
     setAdding(true);
     setError('');
     try {
-      const traces = await fetchAllTraces(xField, yFields);
-      const title = yFields.length === 1
-        ? `${yFields[0]} vs ${xField}`
-        : `${yFields.join(', ')} vs ${xField}`;
+      const traces = await fetchAllTraces(xField, y1Fields, y2Fields);
+      const allYs = [...y1Fields, ...y2Fields];
+      const title = allYs.length === 1
+        ? `${allYs[0]} vs ${xField}`
+        : `${allYs.join(', ')} vs ${xField}`;
       onLivePlot(traces, title, selectedStream, dataSubNode, dataNodeFamily);
     } catch {
       if (runAcquiring) {
@@ -730,33 +869,7 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
     }
   };
 
-  const handleAddTraces = async () => {
-    if (!xField || yFields.length === 0 || adding || !onAddTraces) return;
-    setAdding(true);
-    setError('');
-    try {
-      const traces = await fetchAllTraces(xField, yFields);
-      onAddTraces(traces);
-    } catch {
-      setError('Failed to fetch data');
-    } finally {
-      setAdding(false);
-    }
-  };
 
-  const handleAddTracesRight = async () => {
-    if (!xField || yFields.length === 0 || adding || !onAddTracesRight) return;
-    setAdding(true);
-    setError('');
-    try {
-      const traces = await fetchAllTraces(xField, yFields);
-      onAddTracesRight(traces);
-    } catch {
-      setError('Failed to fetch data');
-    } finally {
-      setAdding(false);
-    }
-  };
 
   const thClass = 'px-2 py-1 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-200 bg-gray-50';
   const tdClass = 'px-2 py-1 text-xs text-gray-700';
@@ -777,56 +890,52 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
           >
             {streams.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
-          {zMode ? (
-            <div className="ml-auto flex items-center gap-1">
-              <button
-                onClick={() => onGridPlot?.(selectedStream)}
-                disabled={yFields.length === 0}
-                className="px-2 py-0.5 text-xs bg-sky-600 text-white rounded hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
-              >Plot grid</button>
-              <button
-                onClick={() => onGrid1DPlot?.(selectedStream)}
-                disabled={yFields.length === 0}
-                className="px-2 py-0.5 text-xs bg-sky-600 text-white rounded hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
-              >Plot 1D</button>
-            </div>
-          ) : (
-            <div className="ml-auto flex items-center gap-1">
-              {onImageOpen && imageYField ? (
-                <button
-                  onClick={() => {
-                    const f = fields.find(fi => fi.name === imageYField);
-                    if (f) {
-                      const imgSubNode = f.subNode !== undefined ? f.subNode : dataSubNode;
-                      onImageOpen(imageYField, selectedStream, imgSubNode, f.shape);
-                    }
-                  }}
-                  className="px-2 py-0.5 text-xs bg-sky-600 text-white rounded hover:bg-sky-500 font-medium"
-                >View image</button>
-              ) : (
-                <>
-                  <button
-                    onClick={() => { setPendingAction(null); handlePlot(); }}
-                    disabled={!xField || yFields.length === 0 || adding}
-                    className="px-2 py-0.5 text-xs bg-sky-600 text-white rounded hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
-                    title="Replace plot with selected fields"
-                  >{adding ? '…' : 'Plot'}</button>
-                  <button
-                    onClick={handleAddTraces}
-                    disabled={!xField || yFields.length === 0 || adding || !onAddTraces}
-                    className="px-2 py-0.5 text-xs bg-white border border-sky-600 text-sky-600 rounded hover:bg-sky-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
-                    title={onAddTraces ? 'Add curve(s) to left axis' : 'No plot open — use Plot first'}
-                  >+L</button>
-                  <button
-                    onClick={handleAddTracesRight}
-                    disabled={!xField || yFields.length === 0 || adding || !onAddTracesRight}
-                    className="px-2 py-0.5 text-xs bg-white border border-sky-600 text-sky-600 rounded hover:bg-sky-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
-                    title={onAddTracesRight ? 'Add curve(s) to right axis' : 'No plot open — use Plot first'}
-                  >+R</button>
-                </>
-              )}
-            </div>
-          )}
+           {zMode ? (
+             <div className="ml-auto flex items-center gap-1">
+               <button
+                 onClick={() => onGridPlot?.(selectedStream)}
+                 disabled={y1Fields.length === 0}
+                 className="px-2 py-0.5 text-xs bg-sky-600 text-white rounded hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
+               >Plot grid</button>
+               <button
+                 onClick={() => onGrid1DPlot?.(selectedStream)}
+                 disabled={y1Fields.length === 0}
+                 className="px-2 py-0.5 text-xs bg-sky-600 text-white rounded hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
+               >Plot 1D</button>
+             </div>
+           ) : (
+             <div className="ml-auto flex items-center gap-1">
+               {onImageOpen && imageYField ? (
+                 <button
+                   onClick={() => {
+                     const f = fields.find(fi => fi.name === imageYField);
+                     if (f) {
+                       const imgSubNode = f.subNode !== undefined ? f.subNode : dataSubNode;
+                       onImageOpen(imageYField, selectedStream, imgSubNode, f.shape);
+                     }
+                   }}
+                   className="px-2 py-0.5 text-xs bg-sky-600 text-white rounded hover:bg-sky-500 font-medium"
+                 >View image</button>
+                ) : (
+                  <div className="ml-auto flex items-center gap-1">
+                    <button
+                      onClick={() => { setPendingAction(null); handlePlot(); }}
+                      disabled={!xField || (y1Fields.length === 0 && y2Fields.length === 0) || adding}
+                      className="px-2 py-0.5 text-xs bg-sky-600 text-white rounded hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
+                      title="Replace plot with selected fields"
+                    >{adding ? '…' : 'Plot'}</button>
+                    {onAddTraces && (
+                      <button
+                        onClick={handleAddTracesPlot}
+                        disabled={!xField || (y1Fields.length === 0 && y2Fields.length === 0) || adding}
+                        className="px-2 py-0.5 text-xs bg-white border border-sky-600 text-sky-600 rounded hover:bg-sky-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
+                        title="Add traces to existing plot"
+                      >{adding ? '…' : 'Add traces'}</button>
+                    )}
+                  </div>
+                )}
+             </div>
+           )}
         </div>
         {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
       </div>
@@ -838,23 +947,40 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
             {pendingAction === 'live' && !loading ? 'Waiting for run to start…' : 'Loading…'}
           </div>
         ) : (
-          <table className="w-full border-collapse table-fixed">
-            <colgroup>
-              <col className="w-full" />
-              {!zMode && <col className="w-8" />}
-              <col className="w-8" />
-              {!zMode && <col className="w-8" />}
-              <col className="w-14" />
-            </colgroup>
-            <thead className="sticky top-0 z-10">
-              <tr>
-                <th className={thClass}>Field</th>
-                {!zMode && <th className={`${thClass} text-center`}>X</th>}
-                <th className={`${thClass} text-center`}>{zMode ? 'Z' : 'Y'}</th>
-                {!zMode && <th className={`${thClass} text-center`}>I0</th>}
-                <th className={`${thClass} text-right`}>Shape</th>
-              </tr>
-            </thead>
+           <table className="w-full border-collapse table-fixed">
+             <colgroup>
+               <col className="w-full" />
+               {!zMode && <col className="w-8" />}
+               {!zMode && <col className="w-8" />}
+               {!zMode && <col className="w-8" />}
+               {!zMode && <col className="w-8" />}
+               {zMode && <col className="w-8" />}
+               <col className="w-14" />
+             </colgroup>
+             <thead className="sticky top-0 z-10">
+               <tr>
+                 <th className={thClass}>Field</th>
+                 {!zMode && <th className={`${thClass} text-center`}>X</th>}
+                 {!zMode ? (
+                   <>
+                     <th
+                       className={`${thClass} text-center cursor-pointer hover:bg-gray-100`}
+                       onClick={() => y1Fields.length === sortedFields.filter(f => !onImageOpen || !isImageField(f)).length ? deselectAllY1() : selectAllY1()}
+                       title="Y1: Normalized by I0 (if I0 selected). Click to select/deselect all in this column."
+                     >Y1</th>
+                     <th
+                       className={`${thClass} text-center cursor-pointer hover:bg-gray-100`}
+                       onClick={() => y2Fields.length === sortedFields.filter(f => !onImageOpen || !isImageField(f)).length ? deselectAllY2() : selectAllY2()}
+                       title="Y2: Raw signal (no normalization). Click to select/deselect all in this column."
+                     >Y2</th>
+                     <th className={`${thClass} text-center`}>I0</th>
+                   </>
+                 ) : (
+                   <th className={`${thClass} text-center`}>Z</th>
+                 )}
+                 <th className={`${thClass} text-right`}>Shape</th>
+               </tr>
+             </thead>
             <tbody>
               {sortedFields.map((f, i) => {
                 const isDet = matchesDev(f.name, runDetectors);
@@ -869,78 +995,94 @@ const FieldSelector = forwardRef<FieldSelectorHandle, FieldSelectorProps>(functi
                       {isMotor && <span className="ml-1 text-[10px] text-green-500 font-sans">mot</span>}
                     </td>
                     {!zMode && (
-                      <td className={`${tdClass} text-center`}>
-                        {!isImg && (
-                          <input
-                            type="radio"
-                            name="xField"
-                            checked={xField === f.name}
-                            onChange={() => selectXField(f.name)}
-                            className="accent-sky-600"
-                          />
-                        )}
-                      </td>
-                    )}
-                    <td className={`${tdClass} text-center`}>
-                      {isImg ? (
-                        <input
-                          type="radio"
-                          name="imageYField"
-                          checked={imageYField === f.name}
-                          onChange={() => { setImageYField(f.name); lastImageFieldRef.current = f.name; imageUserDismissed.current = false; }}
-                          onClick={() => { if (imageYField === f.name) { setImageYField(null); imageUserDismissed.current = true; } }}
-                          className="accent-sky-600"
-                        />
-                      ) : zMode ? (
-                        <input
-                          type="radio"
-                          name="zField"
-                          checked={yFields[0] === f.name}
-                          onChange={() => { setYFields([f.name]); lastYRef.current = [f.name]; }}
-                          className="accent-sky-600"
-                        />
-                      ) : (
-                        <input
-                          type="checkbox"
-                          checked={yFields.includes(f.name)}
-                          onChange={() => toggleYField(f.name)}
-                          className="accent-sky-600"
-                        />
-                      )}
-                    </td>
-                    {!zMode && (
-                      <td className={`${tdClass} text-center`}>
-                        {!isImg && (
-                          <input
-                            type="radio"
-                            name="i0Field"
-                            checked={i0Field === f.name}
-                            onChange={() => {
-                              setI0Field(f.name);
-                              if (onAddTraces) handlePlot(xField, yFields, f.name);
-                            }}
-                            onClick={() => {
-                              if (i0Field === f.name) {
-                                setI0Field('');
-                                if (onAddTraces) handlePlot(xField, yFields, '');
-                              }
-                            }}
-                            className="accent-sky-600"
-                          />
-                        )}
-                      </td>
-                    )}
+                       <td className={`${tdClass} text-center`}>
+                         {!isImg && (
+                           <input
+                             type="radio"
+                             name="xField"
+                             checked={xField === f.name}
+                             onChange={() => selectXField(f.name)}
+                             className="accent-sky-600"
+                           />
+                         )}
+                       </td>
+                     )}
+                     {!zMode ? (
+                       <>
+                         <td className={`${tdClass} text-center`}>
+                           {!isImg && (
+                             <input
+                               type="checkbox"
+                               checked={y1Fields.includes(f.name)}
+                               onChange={() => toggleY1Field(f.name)}
+                               className="accent-sky-600"
+                             />
+                           )}
+                         </td>
+                         <td className={`${tdClass} text-center`}>
+                           {!isImg && (
+                             <input
+                               type="checkbox"
+                               checked={y2Fields.includes(f.name)}
+                               onChange={() => toggleY2Field(f.name)}
+                               className="accent-sky-600"
+                             />
+                           )}
+                         </td>
+                         <td className={`${tdClass} text-center`}>
+                           {!isImg && (
+                             <input
+                               type="radio"
+                               name="i0Field"
+                               checked={i0Field === f.name}
+                               onChange={() => {
+                                 setI0Field(f.name);
+                                 if (onAddTraces) handlePlot(xField, y1Fields, y2Fields, f.name);
+                               }}
+                               onClick={() => {
+                                 if (i0Field === f.name) {
+                                   setI0Field('');
+                                   if (onAddTraces) handlePlot(xField, y1Fields, y2Fields, '');
+                                 }
+                               }}
+                               className="accent-sky-600"
+                             />
+                           )}
+                         </td>
+                       </>
+                     ) : (
+                       <td className={`${tdClass} text-center`}>
+                         {isImg ? (
+                           <input
+                             type="radio"
+                             name="imageYField"
+                             checked={imageYField === f.name}
+                             onChange={() => { setImageYField(f.name); lastImageFieldRef.current = f.name; imageUserDismissed.current = false; }}
+                             onClick={() => { if (imageYField === f.name) { setImageYField(null); imageUserDismissed.current = true; } }}
+                             className="accent-sky-600"
+                           />
+                         ) : (
+                           <input
+                             type="radio"
+                             name="zField"
+                             checked={y1Fields[0] === f.name}
+                             onChange={() => { setY1Fields([f.name]); lastY1Ref.current = [f.name]; }}
+                             className="accent-sky-600"
+                           />
+                         )}
+                       </td>
+                     )}
                     <td className={`${tdClass} text-right text-gray-400`}>
                       {livePointCount !== null ? `(${livePointCount})` : f.shape.length > 0 ? `(${f.shape.join(', ')})` : ''}
                     </td>
                   </tr>
                 );
               })}
-              {sortedFields.length === 0 && !loading && (
-                <tr>
-                  <td colSpan={4} className="px-2 py-6 text-center text-xs text-gray-400">No fields found</td>
-                </tr>
-              )}
+               {sortedFields.length === 0 && !loading && (
+                 <tr>
+                   <td colSpan={zMode ? 3 : 6} className="px-2 py-6 text-center text-xs text-gray-400">No fields found</td>
+                 </tr>
+               )}
             </tbody>
           </table>
         )}
