@@ -15,6 +15,7 @@ import { DEFAULT_TRACE_STYLE } from './constants';
 import { matchesDev, matchesToken, selectPlotStream } from './utils/fieldUtils';
 import { fitData, MODEL_NAMES } from './fitting';
 import type { FitResult } from './fitting';
+import { APP_VERSION } from './version';
 
 // localStorage helpers for cursor persistence preference
 const CURSOR_PREF_KEY = 'kestrel:cursorPersistenceMode';
@@ -1110,22 +1111,26 @@ export default function App() {
               </svg>
             </button>
           )}
-          {/* Settings gear */}
-          <div className="relative flex-none" ref={settingsRef}>
-            <button onClick={() => setShowSettings(v => !v)} title="Settings" className="p-2 rounded text-sky-400 hover:text-white hover:bg-sky-800 transition-colors">
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              </svg>
-            </button>
-            {showSettings && (
-              <div className="absolute top-full right-0 mt-1 w-64 bg-sky-950 border border-sky-700 rounded shadow-lg z-50 p-3">
-                <p className="text-sky-400 text-[10px] font-medium uppercase tracking-wide mb-2">Settings</p>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={qserverEnabled} onChange={e => updateSetting('qserverEnabled', e.target.checked)} className="accent-sky-500" />
-                  <span className="text-white text-xs">Enable QServer panel</span>
-                </label>
-                <p className="text-sky-400 text-[10px] font-medium uppercase tracking-wide mt-3 mb-1">Default detector</p>
+           {/* Settings gear */}
+           <div className="relative flex-none" ref={settingsRef}>
+             <button onClick={() => setShowSettings(v => !v)} title="Settings" className="p-2 rounded text-sky-400 hover:text-white hover:bg-sky-800 transition-colors">
+               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                 <circle cx="12" cy="12" r="3" />
+                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+               </svg>
+             </button>
+             {showSettings && (
+               <div className="absolute top-full right-0 mt-1 w-64 bg-sky-950 border border-sky-700 rounded shadow-lg z-50 p-3">
+                 <p className="text-sky-400 text-[10px] font-medium uppercase tracking-wide mb-1">About</p>
+                 <div className="mb-3 pb-3 border-b border-sky-700">
+                   <p className="text-sky-300 text-[10px] font-medium">Kestrel {APP_VERSION}</p>
+                 </div>
+                 <p className="text-sky-400 text-[10px] font-medium uppercase tracking-wide mb-2">Settings</p>
+                 <label className="flex items-center gap-2 cursor-pointer">
+                   <input type="checkbox" checked={qserverEnabled} onChange={e => updateSetting('qserverEnabled', e.target.checked)} className="accent-sky-500" />
+                   <span className="text-white text-xs">Enable QServer panel</span>
+                 </label>
+                 <p className="text-sky-400 text-[10px] font-medium uppercase tracking-wide mt-3 mb-1">Default detector</p>
                 {(['smart', 'hints', 'last'] as const).map(opt => (
                   <label key={opt} className="flex items-center gap-2 cursor-pointer mt-1">
                     <input type="radio" name="detectorDefault" value={opt} checked={(settings.detectorDefault ?? 'smart') === opt} onChange={() => updateSetting('detectorDefault', opt)} className="accent-sky-500" />
@@ -1316,22 +1321,26 @@ export default function App() {
               </svg>
             </button>
           )}
-          {/* Settings gear */}
-          <div className="relative shrink-0" ref={settingsRef}>
-            <button onClick={() => setShowSettings(v => !v)} title="Settings" className="p-2 rounded text-sky-400 hover:text-white hover:bg-sky-800 transition-colors">
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              </svg>
-            </button>
-            {showSettings && (
-              <div className="absolute top-full right-0 mt-1 w-64 bg-sky-950 border border-sky-700 rounded shadow-lg z-50 p-3">
-                <p className="text-sky-400 text-[10px] font-medium uppercase tracking-wide mb-2">Settings</p>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={qserverEnabled} onChange={e => updateSetting('qserverEnabled', e.target.checked)} className="accent-sky-500" />
-                  <span className="text-white text-xs">Enable QServer panel</span>
-                </label>
-                <p className="text-sky-400 text-[10px] font-medium uppercase tracking-wide mt-3 mb-1">Default detector</p>
+           {/* Settings gear */}
+           <div className="relative shrink-0" ref={settingsRef}>
+             <button onClick={() => setShowSettings(v => !v)} title="Settings" className="p-2 rounded text-sky-400 hover:text-white hover:bg-sky-800 transition-colors">
+               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                 <circle cx="12" cy="12" r="3" />
+                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+               </svg>
+             </button>
+             {showSettings && (
+               <div className="absolute top-full right-0 mt-1 w-64 bg-sky-950 border border-sky-700 rounded shadow-lg z-50 p-3">
+                 <p className="text-sky-400 text-[10px] font-medium uppercase tracking-wide mb-1">About</p>
+                 <div className="mb-3 pb-3 border-b border-sky-700">
+                   <p className="text-sky-300 text-[10px] font-medium">Kestrel {APP_VERSION}</p>
+                 </div>
+                 <p className="text-sky-400 text-[10px] font-medium uppercase tracking-wide mb-2">Settings</p>
+                 <label className="flex items-center gap-2 cursor-pointer">
+                   <input type="checkbox" checked={qserverEnabled} onChange={e => updateSetting('qserverEnabled', e.target.checked)} className="accent-sky-500" />
+                   <span className="text-white text-xs">Enable QServer panel</span>
+                 </label>
+                 <p className="text-sky-400 text-[10px] font-medium uppercase tracking-wide mt-3 mb-1">Default detector</p>
                 {(['smart', 'hints', 'last'] as const).map(opt => (
                   <label key={opt} className="flex items-center gap-2 cursor-pointer mt-1">
                     <input type="radio" name="detectorDefault" value={opt} checked={(settings.detectorDefault ?? 'smart') === opt} onChange={() => updateSetting('detectorDefault', opt)} className="accent-sky-500" />

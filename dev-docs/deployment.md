@@ -76,41 +76,44 @@ journalctl --user -q -f -u kestrel.service
 
 ## Deploying an update
 
-Perform the build and registry steps from a GitHub checkout. Deploy the exact same
-short Git revision to `watt`; do not use a mutable `latest` tag.
+Perform the build and registry steps from a GitHub checkout. Deploy an exact version
+tag, not a mutable `latest` tag. For versioning details, see `dev-docs/versioning.md`.
 
 ```bash
 git clone https://github.com/BCDA-APS/kestrel.git
 cd kestrel
 git checkout main
 git pull --ff-only
-GIT_REVISION=$(git rev-parse --short HEAD)
+# Check out a release version tag for a clean, stable image tag.
+# (Deploying from main would include git distance in the tag, which is not suitable for releases.)
+git checkout v0.1.0
+VERSION=$(git describe --tags)
 npm ci
 npm test
 npm run build
-podman build --no-hosts -f Containerfile -t "kestrel:${GIT_REVISION}" .
-podman run --no-hosts --rm -d --name kestrel-test -p 4173:4173 "kestrel:${GIT_REVISION}"
+podman build --no-hosts -f Containerfile -t "kestrel:${VERSION}" .
+podman run --no-hosts --rm -d --name kestrel-test -p 4173:4173 "kestrel:${VERSION}"
 curl -I http://127.0.0.1:4173
 podman stop kestrel-test
 podman login git.aps.anl.gov:8443
-podman tag "kestrel:${GIT_REVISION}" "git.aps.anl.gov:8443/bcda/kestrel:${GIT_REVISION}"
-podman push "git.aps.anl.gov:8443/bcda/kestrel:${GIT_REVISION}"
+podman tag "kestrel:${VERSION}" "git.aps.anl.gov:8443/bcda/kestrel:${VERSION}"
+podman push "git.aps.anl.gov:8443/bcda/kestrel:${VERSION}"
 ```
 
-On `watt`, pull the exact revision:
+On `watt`, pull the exact version tag:
 
 ```bash
-GIT_REVISION=<revision-from-the-build-session>
+VERSION=<from-build-machine>
 podman login git.aps.anl.gov:8443
-podman pull "git.aps.anl.gov:8443/bcda/kestrel:${GIT_REVISION}"
+podman pull "git.aps.anl.gov:8443/bcda/kestrel:${VERSION}"
 ```
 
 Edit `~/.config/systemd/user/kestrel.service` and update the one clearly labeled
 image line:
 
 ```ini
-# Update this line when deploying a new revision.
-Environment=KESTREL_IMAGE=git.aps.anl.gov:8443/bcda/kestrel:<GIT_REVISION>
+# Update this line when deploying a new version.
+Environment=KESTREL_IMAGE=git.aps.anl.gov:8443/bcda/kestrel:v0.1.0
 ```
 
 Then reload and restart the service:
@@ -122,7 +125,7 @@ curl -I http://127.0.0.1:4173
 ```
 
 The image tag in `KESTREL_IMAGE` is the deployed version. To roll back, replace it
-with a previously deployed Git revision, pull that tag, and restart the service.
+with a previously deployed version tag, pull that tag, and restart the service.
 
 The production server binds to all network interfaces, so machines that can reach
 `watt` on port `4173` can access it. The Vite development server defaults to
@@ -155,7 +158,7 @@ mkdir -p ~/.config/systemd/user
 ```
 
 Save the following as `~/.config/systemd/user/kestrel.service`. Replace
-`<GIT_REVISION>` with the revision being deployed:
+`v0.1.0` with the version tag being deployed:
 
 ```ini
 [Unit]
@@ -166,8 +169,8 @@ After=network-online.target
 ConditionHost=watt-vm
 
 [Service]
-# Update this line when deploying a new revision.
-Environment=KESTREL_IMAGE=git.aps.anl.gov:8443/bcda/kestrel:<GIT_REVISION>
+# Update this line when deploying a new version.
+Environment=KESTREL_IMAGE=git.aps.anl.gov:8443/bcda/kestrel:<from-build-machine>
 
 Restart=always
 ExecStartPre=-/usr/bin/podman rm -f kestrel
