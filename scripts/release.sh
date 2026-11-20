@@ -72,15 +72,16 @@ IFS='.' read -r MACRO MESO MICRO <<< "$CURRENT_VERSION"
 echo "Current version: $CURRENT_VERSION"
 echo ""
 echo "Choose bump type:"
-echo "  1) Macro ($MACRO.$((MESO + 1)).0) — Large refactoring/significant impact"
-echo "  2) Meso  ($MACRO.$MESO.$((MICRO + 1))) — Bug fixes or small breaking changes"
+echo "  1) Macro ($((MACRO + 1)).0.0) — Large refactoring/significant impact"
+echo "  2) Meso  ($MACRO.$((MESO + 1)).0) — Bug fixes or small breaking changes"
 echo "  3) Micro ($MACRO.$MESO.$((MICRO + 1))) — New features or fixes with no effort needed"
 echo ""
 read -p "Enter choice (1/2/3): " choice
 
 case "$choice" in
   1)
-    MESO=$((MESO + 1))
+    MACRO=$((MACRO + 1))
+    MESO=0
     MICRO=0
     BUMP_TYPE="Macro"
     ;;
