@@ -10,12 +10,42 @@ set -euo pipefail
 #
 # It then commits both changes, creates an annotated git tag, and shows push instructions.
 #
-# Usage: ./scripts/release.sh [--dry-run]
+# Usage: ./scripts/release.sh [--dry-run] [-h|--help]
+
+show_help() {
+  cat << 'HELP'
+usage: ./scripts/release.sh [--dry-run]
+
+Bump the version and promote CHANGELOG.md entries from Unreleased to a new release.
+
+Options:
+  --dry-run     Preview changes without modifying files or git state
+  -h, --help    Show this help message
+
+EffVer scheme:
+  Macro (X.0.0)   — Large refactoring, significant impact
+  Meso  (X.1.0)   — Bug fixes affecting users, breaking changes with effort
+  Micro (X.1.1)   — New features, fixes with no user effort
+
+Workflow:
+  1. Record changes in ## Unreleased section of CHANGELOG.md as you work
+  2. Run ./scripts/release.sh [--dry-run]
+  3. Choose Macro, Meso, or Micro based on effort required to upgrade
+  4. Script updates package.json, promotes CHANGELOG entries, commits, and tags
+  5. git push origin main && git push origin vX.Y.Z
+  6. Deploy the version tag to production
+
+HELP
+}
 
 DRY_RUN=false
-if [[ "${1:-}" == "--dry-run" ]]; then
-  DRY_RUN=true
-fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run) DRY_RUN=true; shift ;;
+    -h|--help) show_help; exit 0 ;;
+    *) echo "Unknown option: $1"; show_help; exit 1 ;;
+  esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -79,9 +109,8 @@ trap "rm -f $PACKAGE_TMP $CHANGELOG_TMP" EXIT
 # Update package.json
 jq ".version = \"$NEW_VERSION\"" package.json > "$PACKAGE_TMP"
 
-# Update CHANGELOG.md: promote Unreleased → Release version
-# This Python script moves content from Unreleased to a new Release version section
-python3 << 'PYTHON_EOF'
+# Update CHANGELOG.md using a separate Python script
+cat > "$CHANGELOG_TMP.py" << 'PYTHON_SCRIPT'
 import sys
 import re
 
@@ -93,27 +122,26 @@ changelog_out = sys.argv[4]
 with open(changelog_in, 'r') as f:
     content = f.read()
 
-# Find the Unreleased section and extract its content
-# Pattern: "## Unreleased" followed by content until the next "## " or end of file
-pattern = r'(## Unreleased\n)([\s\S]*?)(?=\n## (?!Unreleased)|$)'
+# Find "## Unreleased" and extract content until next "## "
+pattern = r'(## Unreleased\n)([\s\S]*?)(\n## )'
 match = re.search(pattern, content)
 
 if not match:
-    print(f"Error: Could not find ## Unreleased section in {changelog_in}", file=sys.stderr)
+    print(f"Error: Could not find ## Unreleased section", file=sys.stderr)
     sys.exit(1)
 
-unreleased_content = match.group(2)
+unreleased_content = match.group(2).rstrip()
 
 # Create new release section
 new_release = f"""## Release v{new_version}
 
 Released {release_date}
 
-{unreleased_content.rstrip()}
+{unreleased_content}
 
 """
 
-# Replace the Unreleased content with blank subsections, and insert new release
+# Blank unreleased template
 blank_unreleased = """## Unreleased
 
 ### Breaking Changes
@@ -132,74 +160,17 @@ blank_unreleased = """## Unreleased
 
 """
 
-# Construct the new content
-result = content[:match.start(1)] + blank_unreleased + "\n" + new_release + content[match.end():]
+# Reconstruct: everything before Unreleased + blank Unreleased + new Release + everything after
+result = content[:match.start(1)] + blank_unreleased + "\n" + new_release + content[match.start(3):]
 
 with open(changelog_out, 'w') as f:
     f.write(result)
 
 sys.exit(0)
-PYTHON_EOF
+PYTHON_SCRIPT
 
-python3 - "$NEW_VERSION" "$RELEASE_DATE" "CHANGELOG.md" "$CHANGELOG_TMP" << 'PYTHON_EOF'
-import sys
-import re
-
-new_version = sys.argv[1]
-release_date = sys.argv[2]
-changelog_in = sys.argv[3]
-changelog_out = sys.argv[4]
-
-with open(changelog_in, 'r') as f:
-    content = f.read()
-
-# Find the Unreleased section and extract its content
-# Pattern: "## Unreleased" followed by content until the next "## " or end of file
-pattern = r'(## Unreleased\n)([\s\S]*?)(?=\n## )'
-match = re.search(pattern, content)
-
-if not match:
-    print(f"Error: Could not find ## Unreleased section in {changelog_in}", file=sys.stderr)
-    sys.exit(1)
-
-unreleased_content = match.group(2)
-
-# Create new release section
-new_release = f"""## Release v{new_version}
-
-Released {release_date}
-
-{unreleased_content.rstrip()}
-
-"""
-
-# Replace the Unreleased content with blank subsections, and insert new release
-blank_unreleased = """## Unreleased
-
-### Breaking Changes
-
-### New Features
-
-### Enhancements
-
-### Fixes
-
-### Maintenance
-
-### Deprecations
-
-### Known Problems
-
-"""
-
-# Construct the new content: everything before Unreleased + blank Unreleased + new release + everything after
-result = content[:match.start(1)] + blank_unreleased + "\n" + new_release + content[match.end():]
-
-with open(changelog_out, 'w') as f:
-    f.write(result)
-
-sys.exit(0)
-PYTHON_EOF
+python3 "$CHANGELOG_TMP.py" "$NEW_VERSION" "$RELEASE_DATE" "CHANGELOG.md" "$CHANGELOG_TMP"
+rm -f "$CHANGELOG_TMP.py"
 
 if [[ $DRY_RUN == true ]]; then
   echo "=== DRY RUN: Changes that would be made ==="
