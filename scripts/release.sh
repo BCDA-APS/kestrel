@@ -16,7 +16,8 @@ show_help() {
   cat << 'HELP'
 usage: ./scripts/release.sh [--dry-run]
 
-Bump the version and promote CHANGELOG.md entries from Unreleased to a new release.
+Bump the version and create release tags (RC or final).
+Final releases promote CHANGELOG.md entries from Unreleased to a versioned section.
 
 Options:
   --dry-run     Preview changes without modifying files or git state
@@ -27,13 +28,18 @@ EffVer scheme:
   Meso  (X.1.0)   — Bug fixes affecting users, breaking changes with effort
   Micro (X.1.1)   — New features, fixes with no user effort
 
+Release types:
+  RC (vX.Y.ZrcN)  — Pre-release for testing; Unreleased section unchanged
+  Final (vX.Y.Z)  — Official release; promotes Unreleased to versioned section
+
 Workflow:
   1. Record changes in ## Unreleased section of CHANGELOG.md as you work
   2. Run ./scripts/release.sh [--dry-run]
   3. Choose Macro, Meso, or Micro based on effort required to upgrade
-  4. Script updates package.json, promotes CHANGELOG entries, commits, and tags
-  5. git push origin main && git push origin vX.Y.Z
-  6. Deploy the version tag to production
+  4. Choose RC for testing or Final for official release
+  5. Script updates package.json, creates commit and tag
+  6. git push origin main && git push origin vX.Y.Z
+  7. Deploy the version tag to production
 
 HELP
 }
@@ -93,7 +99,40 @@ case "$choice" in
     ;;
 esac
 
-NEW_VERSION="$MACRO.$MESO.$MICRO"
+CANDIDATE_VERSION="$MACRO.$MESO.$MICRO"
+
+# Ask if this is a release candidate or final release
+echo ""
+echo "Release type:"
+echo "  1) Release candidate (${CANDIDATE_VERSION}rc1, ${CANDIDATE_VERSION}rc2, ...)"
+echo "  2) Final release (${CANDIDATE_VERSION})"
+echo ""
+read -p "Enter choice (1/2): " rc_choice
+
+case "$rc_choice" in
+  1)
+    # Find latest RC number for this version
+    LATEST_RC=$(git tag -l "v${CANDIDATE_VERSION}rc*" --sort=-version:refname | head -1)
+    if [[ -z "$LATEST_RC" ]]; then
+      RC_NUM=1
+    else
+      # Extract RC number from tag (e.g., v0.1.1rc2 → 2)
+      RC_NUM=$(echo "$LATEST_RC" | sed "s/v${CANDIDATE_VERSION}rc//")
+      RC_NUM=$((RC_NUM + 1))
+    fi
+    NEW_VERSION="${CANDIDATE_VERSION}rc${RC_NUM}"
+    IS_RC=true
+    ;;
+  2)
+    NEW_VERSION="$CANDIDATE_VERSION"
+    IS_RC=false
+    ;;
+  *)
+    echo "Invalid choice."
+    exit 1
+    ;;
+esac
+
 TAG="v$NEW_VERSION"
 RELEASE_DATE=$(date +%Y-%m-%d)
 
@@ -109,8 +148,9 @@ trap "rm -f $PACKAGE_TMP $CHANGELOG_TMP" EXIT
 # Update package.json
 jq ".version = \"$NEW_VERSION\"" package.json > "$PACKAGE_TMP"
 
-# Update CHANGELOG.md using a separate Python script
-cat > "$CHANGELOG_TMP.py" << 'PYTHON_SCRIPT'
+# Update CHANGELOG.md only for final releases (not RCs)
+if [[ "$IS_RC" == false ]]; then
+  cat > "$CHANGELOG_TMP.py" << 'PYTHON_SCRIPT'
 import sys
 import re
 
@@ -169,8 +209,12 @@ with open(changelog_out, 'w') as f:
 sys.exit(0)
 PYTHON_SCRIPT
 
-python3 "$CHANGELOG_TMP.py" "$NEW_VERSION" "$RELEASE_DATE" "CHANGELOG.md" "$CHANGELOG_TMP"
-rm -f "$CHANGELOG_TMP.py"
+  python3 "$CHANGELOG_TMP.py" "$NEW_VERSION" "$RELEASE_DATE" "CHANGELOG.md" "$CHANGELOG_TMP"
+  rm -f "$CHANGELOG_TMP.py"
+else
+  # For RCs, just copy CHANGELOG as-is (no changes)
+  cp CHANGELOG.md "$CHANGELOG_TMP"
+fi
 
 if [[ $DRY_RUN == true ]]; then
   echo "=== DRY RUN: Changes that would be made ==="
@@ -191,14 +235,27 @@ cp "$CHANGELOG_TMP" CHANGELOG.md
 
 # Stage and commit
 git add package.json CHANGELOG.md
-git commit -m "Release version $NEW_VERSION"
+if [[ "$IS_RC" == true ]]; then
+  git commit -m "Release candidate $NEW_VERSION"
+else
+  git commit -m "Release version $NEW_VERSION"
+fi
 
 # Create annotated tag
-git tag -a "$TAG" -m "Release $NEW_VERSION"
+if [[ "$IS_RC" == true ]]; then
+  git tag -a "$TAG" -m "Release candidate $NEW_VERSION"
+else
+  git tag -a "$TAG" -m "Release $NEW_VERSION"
+fi
 
 echo ""
-echo "✓ CHANGELOG.md and package.json updated and committed."
-echo "✓ Tag created: $TAG"
+if [[ "$IS_RC" == true ]]; then
+  echo "✓ Release candidate $NEW_VERSION created."
+  echo "✓ Tag created: $TAG (Unreleased section unchanged)"
+else
+  echo "✓ CHANGELOG.md and package.json updated and committed."
+  echo "✓ Tag created: $TAG"
+fi
 echo ""
 echo "Next steps:"
 echo "  1. Review the commit and tag:"

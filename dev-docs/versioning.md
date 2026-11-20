@@ -36,10 +36,11 @@ Releases are **manual and on-demand**, not automatic. This gives maintainers con
    The script:
    - Validates a clean working tree
    - Prompts you to choose Macro/Meso/Micro
+   - Prompts you to choose Release Candidate or Final Release
    - Updates `package.json` with the new version
-   - Promotes entries from `## Unreleased` in `CHANGELOG.md` to a new `## Release v<VERSION>` section
-   - Regenerates blank subsections under `## Unreleased`
-   - Commits both changes
+   - For final releases: promotes entries from `## Unreleased` in `CHANGELOG.md` to a new `## Release v<VERSION>` section and regenerates blank subsections
+   - For RCs: leaves `## Unreleased` unchanged (RCs are pre-release testing, not official releases)
+   - Commits the changes
    - Creates an annotated git tag
    - Shows push instructions
    
@@ -67,6 +68,29 @@ The app embeds its version at build time using `git describe --tags`:
 - **Between releases:** `v1.2.0-5-g3a7b9c1` (5 commits ahead, short SHA)
 
 This information is computed during the build and injected into the app. When an About dialog is added (future work), it will display the version.
+
+## Release Candidates (RCs)
+
+Release candidates are pre-release testing versions. They are useful for:
+- Testing breaking changes before final release
+- Getting early feedback from users
+- Creating deployment checkpoints without committing to final version
+
+**RC versioning:**
+- Format: `vX.Y.ZrcN` (e.g., `v0.1.0rc1`, `v0.1.0rc2`)
+- RCs are numbered sequentially for a given version
+- When running `./scripts/release.sh`, choose "Release candidate" after selecting the bump type
+- The script automatically increments RC numbers
+
+**CHANGELOG behavior:**
+- RCs **do not** consume the `## Unreleased` section
+- Changes remain in `## Unreleased` during all RC testing
+- Only the final release (chosen as "Final release" in the script) promotes `## Unreleased` entries to a versioned release section
+
+**Workflow example:**
+1. Test version 0.1.0 with RC: `./scripts/release.sh` → Micro bump → RC → creates v0.1.0rc1
+2. Find issues, fix, test again: `./scripts/release.sh` → Micro bump → RC → creates v0.1.0rc2
+3. Ready for final release: `./scripts/release.sh` → Micro bump → Final release → creates v0.1.0 and closes `## Unreleased`
 
 ## Examples for Kestrel context
 
