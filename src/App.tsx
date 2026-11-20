@@ -12,7 +12,7 @@ import GridScan1DPanel from './components/GridScan1DPanel';
 import ImagePanel from './components/ImagePanel';
 import type { Panel, XYTrace, TraceStyle, CursorPersistenceMode } from './types';
 import { DEFAULT_TRACE_STYLE } from './constants';
-import { assignTraceAxes, matchesDev, matchesToken, selectPlotStream } from './utils/fieldUtils';
+import { matchesDev, matchesToken, selectPlotStream } from './utils/fieldUtils';
 import { fitData, MODEL_NAMES } from './fitting';
 import type { FitResult } from './fitting';
 
@@ -650,8 +650,18 @@ export default function App() {
   const isGridScanRef = useRef(isGridScan);
   useEffect(() => { isGridScanRef.current = isGridScan; }, [isGridScan]);
 
-  // Keep the first two selected signals on separate axes for different magnitudes.
-  const initialTraceAxes = (traces: XYTrace[]): ('y1' | 'y2')[] => assignTraceAxes(traces.length);
+  // Assign Y1/Y2 axes: traces with rawYLabel go to y1, others go to y2.
+  // All Y1 traces always have rawYLabel set (even without I0 normalization).
+  // Y2 traces never have rawYLabel.
+  const initialTraceAxes = (traces: XYTrace[]): ('y1' | 'y2')[] => {
+    const hasY1Traces = traces.some(t => t.rawYLabel !== undefined);
+    if (hasY1Traces) {
+      // Mixed Y1/Y2 or Y1-only: use explicit mapping
+      return traces.map(t => t.rawYLabel !== undefined ? 'y1' : 'y2');
+    }
+    // All Y2 (no rawYLabel): put all on y2
+    return Array(traces.length).fill('y2');
+  };
 
   const plot = useCallback((traces: XYTrace[], title: string) => {
     if (isGridScanRef.current) {
@@ -823,17 +833,23 @@ export default function App() {
     setPanel((prev) => {
       if (!prev || prev.type !== 'xy') return prev;
       const traces = prev.traces.filter((_, i) => i !== index);
-      return traces.length === 0 ? null : { ...prev, traces };
+      if (traces.length === 0) return null;
+      // Update traceAxes to match the remaining traces and re-assign axes
+      setTraceAxes(initialTraceAxes(traces));
+      return { ...prev, traces };
     });
-  }, []);
+  }, [initialTraceAxes]);
 
   const removeRunTraces = useCallback((runId: string) => {
     setPanel((prev) => {
       if (!prev || prev.type !== 'xy') return prev;
       const traces = prev.traces.filter(t => t.runId !== runId);
-      return traces.length === 0 ? null : { ...prev, traces };
+      if (traces.length === 0) return null;
+      // Update traceAxes to match the remaining traces and re-assign axes
+      setTraceAxes(initialTraceAxes(traces));
+      return { ...prev, traces };
     });
-  }, []);
+  }, [initialTraceAxes]);
 
   const handleRemoveTrace = useCallback((index: number) => {
     if (panel?.type === 'xy') {
@@ -844,10 +860,12 @@ export default function App() {
       // If removing the last real trace while d/dx is active, promote derivative to a standalone trace
       if (panel.traces.length === 1 && showDerivative && derivativeTraces.length > 0) {
         const dt = derivativeTraces[0];
+        const newTraces = [{ x: dt.x, y: dt.y, xLabel: dt.xLabel, yLabel: dt.yLabel, runLabel: dt.runLabel, runId: crypto.randomUUID() }];
         setPanel(prev => prev?.type === 'xy' ? {
           ...prev,
-          traces: [{ x: dt.x, y: dt.y, xLabel: dt.xLabel, yLabel: dt.yLabel, runLabel: dt.runLabel, runId: crypto.randomUUID() }],
+          traces: newTraces,
         } : prev);
+        setTraceAxes(initialTraceAxes(newTraces));
         setShowDerivative(false);
         return;
       }
@@ -1450,28 +1468,31 @@ export default function App() {
                     onMouseDown={handleRunsDividerMouseDown}
                   />
                   <div className="flex-1 min-h-0 overflow-hidden">
-                    <FieldSelector
-                      ref={fieldSelectorRef}
-                      serverUrl={serverUrl}
-                      catalog={selectedCatalog}
-                      runId={selectedRunId}
-                      runLabel={selectedRunLabel}
-                      runDetectors={selectedRunDetectors}
-                      runHintsDetectors={selectedRunHintsDetectors}
-                      detectorDefault={settings.detectorDefault ?? 'smart'}
-                      dichroMode={settings.dichroMode !== false}
-                      runMotors={selectedRunMotors}
-                      runAcquiring={selectedRunAcquiring}
-                      onPlot={plot}
-                      onAddTraces={panel?.type === 'xy' ? addTraces : null}
-                      onAddTracesRight={panel?.type === 'xy' ? addTracesRight : null}
-                      onLivePlot={livePlot}
-                      onRemoveRunTraces={removeRunTraces}
-                      onZSelect={isGridScan ? setGridZField : undefined}
-                      onGridPlot={isGridScan ? (stream) => { pendingGridHeatmapRef.current = false; setGridStream(stream); setShowGridHeatmap(true); setShowGrid1D(false); setCenterTab('graph'); } : undefined}
-                      onGrid1DPlot={isGridScan ? (stream) => { setGridStream(stream); setShowGrid1D(true); setShowGridHeatmap(false); setCenterTab('graph'); } : undefined}
-                      onImageOpen={(fieldName, stream, dataSubNode, shape) => { setImageState({ fieldName, stream, dataSubNode, shape }); setPanel(null); setFitResults(null); setCenterTab('graph'); }}
-                    />
+                     <FieldSelector
+                       ref={fieldSelectorRef}
+                       serverUrl={serverUrl}
+                       catalog={selectedCatalog}
+                       runId={selectedRunId}
+                       runLabel={selectedRunLabel}
+                       runDetectors={selectedRunDetectors}
+                       runHintsDetectors={selectedRunHintsDetectors}
+                       detectorDefault={settings.detectorDefault ?? 'smart'}
+                       dichroMode={settings.dichroMode !== false}
+                       runMotors={selectedRunMotors}
+                       runAcquiring={selectedRunAcquiring}
+                       onPlot={plot}
+                       onAddTraces={panel?.type === 'xy' ? addTraces : null}
+                       onAddTracesRight={panel?.type === 'xy' ? addTracesRight : null}
+                       onLivePlot={livePlot}
+                       onRemoveRunTraces={removeRunTraces}
+                       onZSelect={isGridScan ? setGridZField : undefined}
+                       onGridPlot={isGridScan ? (stream) => { pendingGridHeatmapRef.current = false; setGridStream(stream); setShowGridHeatmap(true); setShowGrid1D(false); setCenterTab('graph'); } : undefined}
+                       onGrid1DPlot={isGridScan ? (stream) => { setGridStream(stream); setShowGrid1D(true); setShowGridHeatmap(false); setCenterTab('graph'); } : undefined}
+                       onImageOpen={(fieldName, stream, dataSubNode, shape) => { setImageState({ fieldName, stream, dataSubNode, shape }); setPanel(null); setFitResults(null); setCenterTab('graph'); }}
+                       preferredStream={panel?.type === 'xy' && panel.liveConfig?.stream ? panel.liveConfig.stream : undefined}
+                       preferredXField={panel?.type === 'xy' && panel.traces.length > 0 ? panel.traces[0]?.xLabel : undefined}
+                       preferredYFields={panel?.type === 'xy' && panel.traces.length > 0 ? [...new Set(panel.traces.map(t => t.yLabel))] : undefined}
+                     />
                   </div>
                 </>
               )}
