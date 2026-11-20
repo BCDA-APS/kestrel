@@ -225,6 +225,10 @@ if [[ $DRY_RUN == true ]]; then
   echo ""
   echo "--- CHANGELOG.md changes ---"
   diff -u CHANGELOG.md "$CHANGELOG_TMP" || true
+  if [[ "$IS_RC" == true ]]; then
+    echo "(Note: RCs do not update CHANGELOG.md; Unreleased section stays open."
+    echo "Final releases will promote Unreleased entries to a versioned section.)"
+  fi
   echo ""
   echo "=== END DRY RUN ==="
   exit 0
