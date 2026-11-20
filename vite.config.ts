@@ -2,6 +2,8 @@ import { defineConfig, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import http from 'node:http';
 import https from 'node:https';
+import { execSync } from 'node:child_process';
+import fs from 'node:fs';
 
 function tiledProxyPlugin(): Plugin {
   return {
@@ -216,6 +218,24 @@ function qserverSSEPlugin(): Plugin {
   };
 }
 
+// Get version from git describe, falling back to package.json version
+function getAppVersion(): string {
+  try {
+    return execSync('git describe --tags', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
+  } catch {
+    // Not a git repo or no tags; fall back to package.json
+    try {
+      const pkg = JSON.parse(fs.readFileSync('./package.json', 'utf-8'));
+      return `v${pkg.version}`;
+    } catch {
+      return 'unknown';
+    }
+  }
+}
+
 export default defineConfig({
   plugins: [react(), tiledProxyPlugin(), qserverProxyPlugin(), qserverSSEPlugin()],
+  define: {
+    __APP_VERSION__: JSON.stringify(getAppVersion()),
+  },
 });
